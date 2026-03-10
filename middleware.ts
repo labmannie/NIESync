@@ -1,24 +1,44 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+import { updateSession } from '@/utils/supabase/middleware';
 
-  // Define protected routes
-  const protectedRoutes = ['/lost-and-found', '/parking-patrol', '/leaderboard'];
+export async function middleware(request: NextRequest) {
+  // Let the Supabase SSR middleware handle session cookie refresh and fetch user
+  const { response, user, hasProfile } = await updateSession(request);
   
+  const { pathname } = request.nextUrl;
+  const protectedRoutes = ['/lost-and-found', '/parking-patrol', '/leaderboard', '/profile'];
   const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
 
-  // Check for our mock auth cookie or a real Supabase auth cookie
-  const isAuthenticated = request.cookies.has('campus-sync-auth') || request.cookies.has('sb-access-token');
-
-  if (isProtectedRoute && !isAuthenticated) {
+  // 1. Unauthenticated users hitting protected routes -> Go to Login
+  if (isProtectedRoute && !user) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next();
+  // 2. Authenticated but Incomplete Profile -> Force to Signup Complete
+  // Blocks them from navigating around the site without finishing profile details
+  if (user && !hasProfile) {
+    if (isProtectedRoute || pathname === '/' || pathname.startsWith('/login') || pathname.startsWith('/signup')) {
+      // Don't intercept if they're already on the completion page or auth callback
+      if (!pathname.startsWith('/signup/complete') && !pathname.startsWith('/auth/callback')) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/signup/complete';
+        return NextResponse.redirect(url);
+      }
+    }
+  }
+
+  // 3. Fully Authenticated and Complete Profile hitting Login/Signup -> Dashboard
+  if ((pathname.startsWith('/login') || pathname.startsWith('/signup')) && user && hasProfile) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/lost-and-found';
+    return NextResponse.redirect(url);
+  }
+
+  return response;
 }
 
 export const config = {

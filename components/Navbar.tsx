@@ -3,14 +3,17 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Shield, Menu, X, LogOut } from "lucide-react";
+import { Shield, Menu, X, LogOut, User } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
+import Image from "next/image";
+import { createClient } from "@/utils/supabase/client";
 
 export function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   
   const pathname = usePathname();
   const router = useRouter();
@@ -18,12 +21,26 @@ export function Navbar() {
   // Check authentication status and handle scroll
   useEffect(() => {
     setMounted(true);
-    const checkAuth = () => {
-      // Check if campus-sync-auth test cookie exists
-      setIsAuthenticated(document.cookie.includes('campus-sync-auth=true'));
+    const supabase = createClient();
+
+    // Check initial session
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setIsAuthenticated(!!session);
     };
     checkAuth();
-  }, [pathname]); // Re-check on route change
+
+    // Listen for auth changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        setIsAuthenticated(!!session);
+      }
+    );
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -31,13 +48,15 @@ export function Navbar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Close mobile menu on navigate
+  // Close mobile menu and dropdowns on navigate
   useEffect(() => {
     setIsMobileMenuOpen(false);
+    setShowLogoutConfirm(false);
   }, [pathname]);
 
-  const handleLogout = () => {
-    document.cookie = "campus-sync-auth=; path=/; max-age=0";
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
     setIsAuthenticated(false);
     router.push("/");
   };
@@ -69,7 +88,7 @@ export function Navbar() {
       >
         {/* Logo */}
         <Link href="/" className="flex items-center gap-3 text-white hover:opacity-90 transition-opacity z-50 group">
-          <Shield className="w-8 h-8 text-accent-blue group-hover:scale-110 transition-transform duration-300" fill="currentColor" strokeWidth={1.5} />
+          <Image src="/logo.png" alt="NIE Sync Logo" width={32} height={32} className="w-8 h-8 object-contain group-hover:scale-110 transition-transform duration-300" />
           <span className="font-extrabold text-2xl tracking-wide">NIE Sync</span>
         </Link>
         
@@ -95,13 +114,40 @@ export function Navbar() {
               Institutional Login
             </Link>
           ) : mounted && isAuthenticated ? (
-            <button 
-              onClick={handleLogout}
-              className="flex items-center gap-2 text-text-secondary hover:text-red-400 transition-colors uppercase tracking-widest text-xs font-bold"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Sign Out</span>
-            </button>
+            <div className="flex items-center gap-6 relative">
+              <Link 
+                href="/profile" 
+                className="flex items-center gap-2 text-text-secondary hover:text-accent-blue transition-colors uppercase tracking-widest text-xs font-bold"
+              >
+                <User className="w-4 h-4" />
+                <span>Profile</span>
+              </Link>
+              <div className="relative">
+                <button 
+                  onClick={() => setShowLogoutConfirm(!showLogoutConfirm)}
+                  className="flex items-center gap-2 text-text-secondary hover:text-red-400 transition-colors uppercase tracking-widest text-xs font-bold"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign Out</span>
+                </button>
+                <AnimatePresence>
+                  {showLogoutConfirm && (
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                      className="absolute right-0 top-full mt-4 bg-campus-black border border-white/10 p-4 shadow-2xl rounded-sm w-48 z-50 flex flex-col gap-3"
+                    >
+                      <span className="text-xs font-bold uppercase tracking-wider text-white text-center">Confirm Logout?</span>
+                      <div className="flex gap-2">
+                        <button onClick={() => setShowLogoutConfirm(false)} className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-wider text-text-secondary rounded-sm transition-colors">Cancel</button>
+                        <button onClick={handleLogout} className="flex-1 py-2 bg-red-500/20 hover:bg-red-500/40 text-xs font-bold uppercase tracking-wider text-red-400 rounded-sm transition-colors">Yes</button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
           ) : (
             <div className="w-40 h-10" />
           )}
@@ -158,13 +204,33 @@ export function Navbar() {
                   Institutional Login
                 </Link>
               ) : mounted && isAuthenticated ? (
-                <button 
-                  onClick={handleLogout}
-                  className="w-full text-center border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 py-5 text-red-400 font-bold tracking-[0.2em] text-sm uppercase rounded-sm transition-colors flex items-center justify-center gap-3"
-                >
-                  <LogOut className="w-5 h-5" />
-                  Sign Out
-                </button>
+                <div className="w-full flex flex-col gap-4">
+                  <Link 
+                    href="/profile"
+                    className="w-full text-center border border-white/10 bg-white/5 hover:bg-white/10 py-5 text-white font-bold tracking-[0.2em] text-sm uppercase rounded-sm transition-colors flex items-center justify-center gap-3"
+                  >
+                    <User className="w-5 h-5" />
+                    Profile Hub
+                  </Link>
+
+                  {!showLogoutConfirm ? (
+                    <button 
+                      onClick={() => setShowLogoutConfirm(true)}
+                      className="w-full text-center border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 py-5 text-red-400 font-bold tracking-[0.2em] text-sm uppercase rounded-sm transition-colors flex items-center justify-center gap-3"
+                    >
+                      <LogOut className="w-5 h-5" />
+                      Sign Out
+                    </button>
+                  ) : (
+                    <div className="w-full relative overflow-hidden rounded-sm border border-red-500/50 bg-campus-black p-4 flex flex-col gap-3">
+                      <span className="text-xs font-bold uppercase tracking-wider text-white text-center">Are you sure?</span>
+                      <div className="flex gap-2">
+                        <button onClick={() => setShowLogoutConfirm(false)} className="flex-1 py-3 bg-white/5 text-xs font-bold uppercase tracking-wider text-text-secondary rounded-sm">Cancel</button>
+                        <button onClick={handleLogout} className="flex-1 py-3 bg-red-500 text-xs font-bold uppercase tracking-wider text-white rounded-sm">Logout</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : null}
             </motion.div>
           </motion.div>

@@ -1,45 +1,121 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Shield, Mail, Lock, AlertCircle, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import Image from "next/image";
+import { createClient } from "@/utils/supabase/client";
 
-export default function Login() {
+function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
+  
+  const [loginMode, setLoginMode] = useState<"password" | "magiclink">("password");
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get("error") === "invalid-domain") {
+      setError("Access Denied: Please use your @nie.ac.in institutional email.");
+    }
+  }, [searchParams]);
+
+  const checkProviderBeforeLogin = async (supabase: any) => {
+    // Attempt to lookup the profile's auth_provider without needing RLS bypass if email is matched
+    // Requires a secure RPC or we can just attempt login and catch the specific Error.
+    // Easiest method within pure client constraints: Attempt auth, intercept "Invalid login credentials".
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSuccess("");
     
-    // Simulate domain restriction
+    // Simulate domain restriction natively
     if (!email.endsWith("@nie.ac.in")) {
       setError("Access Denied: Only @nie.ac.in institutional emails are authorized.");
       return;
     }
 
-    if (password.length < 6) {
-      setError("Invalid credentials.");
+    setIsLoading(true);
+    const supabase = createClient();
+    
+    // MAGIC LINK FLOW (Send Magic Link)
+    if (loginMode === "magiclink" && !magicLinkSent) {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: false, // Explicitly deny signup from login page
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        }
+      });
+
+      if (error) {
+        if (error.message.includes("Signups not allowed")) {
+          setError("Account not found. Please request access (Sign Up) first.");
+        } else {
+          setError(error.message);
+        }
+      } else {
+        setSuccess("Magic Link dispatched! Check your institutional email inbox to instantly authenticate safely without a password.");
+        setMagicLinkSent(true);
+      }
+      setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
-    
-    // Simulate API call, set cookie, and redirect
-    setTimeout(() => {
-      document.cookie = "campus-sync-auth=true; path=/; max-age=86400";
+    // PASSWORD FLOW
+    if (password.length < 6) {
+      setError("Invalid credentials. Password must be at least 6 characters.");
       setIsLoading(false);
-      router.push("/lost-and-found");
-    }, 1500);
+      return;
+    }
+
+    // Attempt Sign In
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      // Identity Header check heuristic 
+      // Supabase returns standard "Invalid login credentials" if pasword fails or if it's purely an OAuth account.
+      // We will provide a smart hint to the user if this error occurs.
+      if (error.message.includes("Invalid login credentials")) {
+        setError("Invalid credentials. If you previously registered using Google Workspace or Magic Link, please use those respective options instead.");
+      } else {
+        setError(error.message);
+      }
+      
+      setIsLoading(false);
+      return;
+    }
+
+    // Success redirect
+    router.push("/lost-and-found");
   };
 
-  const handleGoogleAuth = () => {
-    setError("Connect Supabase to enable Google OAuth.");
+  const handleGoogleAuth = async () => {
+    setError("");
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      }
+    });
+
+    if (error) {
+      setError(error.message);
+    }
   };
 
   return (
@@ -59,7 +135,7 @@ export default function Login() {
           className="flex flex-col items-center justify-center mb-10"
         >
           <Link href="/" className="w-16 h-16 bg-white/5 border border-white/10 rounded-full flex items-center justify-center mb-6 shadow-xl hover:bg-white/10 transition-colors">
-            <Shield className="w-8 h-8 text-accent-amber" />
+            <Image src="/logo.png" alt="Logo" width={40} height={40} className="w-8 h-8 object-contain" />
           </Link>
           <h1 className="text-3xl font-bold uppercase tracking-widest text-white mb-2">Campus Sync</h1>
           <p className="text-text-secondary text-sm font-medium tracking-wide">SECURE INSTITUTIONAL ACCESS</p>
@@ -91,6 +167,20 @@ export default function Login() {
               )}
             </AnimatePresence>
 
+            <AnimatePresence>
+              {success && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-green-500/10 border border-green-500/30 text-green-400 p-3 rounded-sm text-sm flex items-start gap-2"
+                >
+                  <Shield className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{success}</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Email Field */}
             <div className="flex flex-col gap-2">
               <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Institutional Email</label>
@@ -99,48 +189,97 @@ export default function Login() {
                 <input 
                   type="email" 
                   value={email}
+                  disabled={magicLinkSent}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name.yr@nie.ac.in" 
-                  className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20"
+                  className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20 disabled:opacity-50"
                   required
                 />
               </div>
             </div>
 
-            {/* Password Field */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex justify-between">
-                <span>Password / OTP</span>
-                <a href="#" className="text-accent-amber hover:underline">Forgot?</a>
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
-                <input 
-                  type="password" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••" 
-                  className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20"
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Submit */}
-            <button 
-              type="submit" 
-              disabled={isLoading}
-              className="mt-2 bg-accent-amber text-campus-black font-bold uppercase tracking-widest text-sm py-4 clip-diagonal hover:bg-[#FFC133] transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-70"
-            >
-              {isLoading ? (
-                <span className="w-5 h-5 border-2 border-campus-black/30 border-t-campus-black rounded-full animate-spin"></span>
-              ) : (
-                <>
-                  <span>Authenticate</span>
-                  <ArrowRight className="w-4 h-4" />
-                </>
+            {/* Dynamic Auth Method Toggles */}
+            <AnimatePresence mode="wait">
+              {loginMode === "password" && !magicLinkSent && (
+                <motion.div 
+                  key="password-mode"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex flex-col gap-2"
+                >
+                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex justify-between">
+                    <span>Secure Password</span>
+                    <button type="button" onClick={() => { setLoginMode("magiclink"); setError(""); }} className="text-accent-amber hover:underline tracking-widest uppercase text-[10px]">
+                      Use Magic Link?
+                    </button>
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
+                    <input 
+                      type="password" 
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••" 
+                      className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20"
+                      required={loginMode === "password"}
+                    />
+                  </div>
+                </motion.div>
               )}
-            </button>
+
+              {loginMode === "magiclink" && !magicLinkSent && (
+                <motion.div 
+                  key="magiclink-request"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex flex-col gap-2"
+                >
+                  <div className="flex justify-end w-full">
+                     <button type="button" onClick={() => { setLoginMode("password"); setError(""); }} className="text-accent-amber hover:underline tracking-widest uppercase text-[10px] font-bold">
+                        Use Password Instead?
+                      </button>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2 text-text-secondary bg-white/5 p-3 rounded-sm border border-white/5">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-accent-amber" />
+                    <span className="text-xs leading-relaxed">We will dispatch a secure Magic Link to your institutional inbox. Click it to log in without a password.</span>
+                  </div>
+                </motion.div>
+              )}
+
+              {magicLinkSent && (
+                <motion.div 
+                  key="magiclink-sent"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex flex-col gap-2"
+                >
+                  <button type="button" onClick={() => { setMagicLinkSent(false); setSuccess(""); }} className="bg-white/5 hover:bg-white/10 uppercase tracking-widest py-3 font-bold text-xs text-text-secondary rounded-sm transition-colors border border-white/10">
+                    Change Email / Resend
+                  </button>
+                </motion.div>
+              )}
+
+            </AnimatePresence>
+
+            {!magicLinkSent && (
+              <button 
+                type="submit" 
+                disabled={isLoading}
+                className="mt-2 bg-accent-amber text-campus-black font-bold uppercase tracking-widest text-sm py-4 clip-diagonal hover:bg-[#FFC133] transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-70"
+              >
+                {isLoading ? (
+                  <span className="w-5 h-5 border-2 border-campus-black/30 border-t-campus-black rounded-full animate-spin"></span>
+                ) : (
+                  <>
+                    <span>{loginMode === "magiclink" ? "Dispatch Magic Link" : "Authenticate"}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            )}
           </form>
 
           <div className="my-8 flex items-center gap-4">
@@ -165,10 +304,19 @@ export default function Login() {
         </motion.div>
 
         <p className="text-center text-text-secondary text-xs mt-8">
+          Don't have an account? <Link href="/signup" className="text-accent-amber hover:underline font-bold tracking-wide">REQUEST ACCESS</Link><br/><br/>
           By authenticating, you agree to the Campus Sync <a href="#" className="text-white hover:underline">Terms of Service</a> and <a href="#" className="text-white hover:underline">Privacy Policy</a>.
         </p>
 
       </div>
     </main>
   );
+}
+
+export default function Login() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-campus-black w-full flex items-center justify-center text-white/50 animate-pulse">Loading secure connection...</div>}>
+      <LoginContent />
+    </Suspense>
+  )
 }

@@ -6,7 +6,7 @@ import { Navbar } from "@/components/Navbar";
 const rubik = Rubik({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "NIE Campus Sync | Hero Dashboard",
+  title: "NIE Campus Sync",
   description: "The unified portal for NIE students to report parking violations and track lost items in real-time.",
 };
 

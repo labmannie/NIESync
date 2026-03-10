@@ -1,9 +1,0 @@
-{
-  "/icon.ico/route": "app/icon.ico/route.js",
-  "/page": "app/page.js",
-  "/signup/page": "app/signup/page.js",
-  "/signup/complete/page": "app/signup/complete/page.js",
-  "/lost-and-found/page": "app/lost-and-found/page.js",
-  "/profile/page": "app/profile/page.js",
-  "/login/page": "app/login/page.js"
-}

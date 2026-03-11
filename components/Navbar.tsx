@@ -108,11 +108,16 @@ export function Navbar() {
         </div>
 
         {/* Desktop Action / Auth */}
-        <div className="hidden md:flex items-center gap-6 z-50">
+        <div className="hidden md:flex items-center gap-4 z-50">
           {mounted && !isAuthenticated ? (
-            <Link href="/login" className="bg-white text-campus-black font-bold text-xs uppercase tracking-widest px-8 py-3 clip-diagonal hover:bg-gray-200 transition-colors duration-200 shadow-[0_0_20px_rgba(255,255,255,0.15)] hover:shadow-[0_0_30px_rgba(255,255,255,0.3)]">
-              Institutional Login
-            </Link>
+            <>
+              <Link href="/login" className="bg-transparent text-white border border-white/20 font-bold text-xs uppercase tracking-widest px-6 py-3 clip-diagonal hover:bg-white/10 transition-colors duration-200 shadow-[0_0_20px_rgba(255,255,255,0.05)]">
+                Institutional Login
+              </Link>
+              <Link href="/signup" className="bg-white text-campus-black font-bold text-xs uppercase tracking-widest px-6 py-3 clip-diagonal hover:bg-gray-200 transition-colors duration-200 shadow-[0_0_20px_rgba(255,255,255,0.15)] hover:shadow-[0_0_30px_rgba(255,255,255,0.3)]">
+                Sign Up
+              </Link>
+            </>
           ) : mounted && isAuthenticated ? (
             <div className="flex items-center gap-6 relative">
               <Link 
@@ -200,9 +205,14 @@ export function Navbar() {
               className="flex flex-col items-center gap-6 mt-12 w-full px-12"
             >
               {mounted && !isAuthenticated ? (
-                <Link href="/login" className="w-full text-center bg-white text-campus-black py-5 font-bold tracking-[0.2em] text-sm uppercase clip-diagonal transition-colors shadow-[0_0_30px_rgba(255,255,255,0.2)]">
-                  Institutional Login
-                </Link>
+                <div className="w-full flex flex-col gap-4">
+                  <Link href="/login" className="w-full text-center border border-white/10 bg-white/5 text-white py-5 font-bold tracking-[0.2em] text-sm uppercase clip-diagonal transition-colors hover:bg-white/10">
+                    Institutional Login
+                  </Link>
+                  <Link href="/signup" className="w-full text-center bg-white text-campus-black py-5 font-bold tracking-[0.2em] text-sm uppercase clip-diagonal transition-colors shadow-[0_0_30px_rgba(255,255,255,0.2)]">
+                    Sign Up
+                  </Link>
+                </div>
               ) : mounted && isAuthenticated ? (
                 <div className="w-full flex flex-col gap-4">
                   <Link 

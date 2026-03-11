@@ -12,7 +12,7 @@ export default function Leaderboard() {
   ];
 
   return (
-    <main className="min-h-screen w-full bg-campus-black text-white flex flex-col relative overflow-hidden">
+    <main className="min-h-screen w-full bg-campus-black text-white flex flex-col relative overflow-hidden pt-28">
       {/* Background ambient lighting */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-[500px] bg-accent-blue/10 rounded-full blur-[120px] pointer-events-none"></div>
 

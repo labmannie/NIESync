@@ -7,7 +7,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
-import { Country, State } from "country-state-city";
+import 'react-phone-number-input/style.css';
+import PhoneInput from 'react-phone-number-input';
 
 const TOTAL_STEPS = 3;
 
@@ -23,14 +24,9 @@ export default function CompleteProfile() {
     firstName: "",
     lastName: "",
     usn: "",
-    countryCode: "+91",
     phone: "",
     role: "Day Scholar",
-    addressLine1: "",
-    addressLine2: "",
-    city: "Mysuru",
-    state: "Karnataka",
-    pincode: "",
+    campus: "South Campus",
     hostelName: "NIE North Boys Hostel",
     roomNo: "",
     hasVehicle: "No",
@@ -48,8 +44,8 @@ export default function CompleteProfile() {
         setError("Please fill all required fields.");
         return;
       }
-      if (!/^\d{10}$/.test(formData.phone)) {
-        setError("Phone number must be exactly 10 digits.");
+      if (formData.phone.length < 10) {
+        setError("Please enter a valid full phone number.");
         return;
       }
     }
@@ -61,8 +57,8 @@ export default function CompleteProfile() {
           return;
         }
       } else {
-        if (!formData.addressLine1 || !formData.city || !formData.pincode) {
-          setError("Please provide your complete address details (Street, City, Pincode).");
+        if (!formData.campus) {
+          setError("Please select your primary campus.");
           return;
         }
       }
@@ -100,10 +96,6 @@ export default function CompleteProfile() {
       return;
     }
 
-    const finalAddress = formData.role === "Hostelite"
-      ? `${formData.hostelName}, Room No: ${formData.roomNo}`
-      : `${formData.addressLine1.trim()}, ${formData.addressLine2 ? formData.addressLine2.trim() + ', ' : ''}${formData.city.trim()}, ${formData.state} - ${formData.pincode.trim()}`;
-
     // Insert into customized public.profiles table
     const { error: profileError } = await supabase.from('profiles').insert([
       {
@@ -111,9 +103,11 @@ export default function CompleteProfile() {
         first_name: formData.firstName,
         last_name: formData.lastName,
         usn: formData.usn,
-        phone: `${formData.countryCode} ${formData.phone.trim()}`,
+        phone: formData.phone,
         role: formData.role,
-        address: finalAddress,
+        campus: formData.role === 'Hostelite' ? null : formData.campus,
+        hostel_name: formData.role === 'Hostelite' ? formData.hostelName : null,
+        room_no: formData.role === 'Hostelite' ? formData.roomNo : null,
         has_vehicle: formData.hasVehicle === 'Yes',
         vehicle_no: formData.hasVehicle === 'Yes' ? formData.vehicleNo : null,
         auth_provider: 'google'
@@ -152,7 +146,7 @@ export default function CompleteProfile() {
   };
 
   return (
-    <main className="min-h-screen w-full bg-campus-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-accent-blue/30 p-4 pt-20">
+    <main className="min-h-screen w-full bg-campus-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-accent-blue/30 p-4 pt-28">
       
       {/* Abstract Backgrounds */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-5xl opacity-30 pointer-events-none">
@@ -243,31 +237,21 @@ export default function CompleteProfile() {
                       type="text" name="usn" value={formData.usn} onChange={handleChange} placeholder="4NI20CS000" 
                       className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
                     />
+                    <p className="text-[10px] text-accent-amber mt-1 flex items-center gap-1 font-bold uppercase tracking-wider"><AlertCircle className="w-3 h-3" /> USN cannot be changed once entered. Please verify carefully.</p>
                   </div>
 
                   <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
-                    <div className="flex gap-2">
-                      <select 
-                        name="countryCode" value={formData.countryCode} onChange={handleChange} 
-                        className="w-[120px] shrink-0 bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none text-center cursor-pointer hover:bg-white/5"
-                      >
-                        <option value="+91" className="bg-campus-black">+91 (IN)</option>
-                        {Country.getAllCountries().map(country => (
-                          <option key={country.isoCode} value={`+${country.phonecode}`} className="bg-campus-black">
-                            +{country.phonecode} ({country.isoCode})
-                          </option>
-                        ))}
-                      </select>
-                      <input 
-                        type="tel" name="phone" value={formData.phone} onChange={(e) => {
-                          const val = e.target.value.replace(/\D/g, '').slice(0, 10);
-                          setFormData(prev => ({...prev, phone: val}));
-                          if(error) setError("");
-                        }} placeholder="99999 99999" 
-                        className="flex-1 bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                      />
-                    </div>
+                    <PhoneInput
+                      international
+                      defaultCountry="IN"
+                      value={formData.phone}
+                      onChange={(value) => {
+                        setFormData(prev => ({...prev, phone: value || ""}));
+                        if(error) setError("");
+                      }}
+                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus-within:border-accent-blue/50 transition-colors text-white PhoneInputOverride"
+                    />
                   </div>
                 </motion.div>
               )}
@@ -337,53 +321,14 @@ export default function CompleteProfile() {
                   ) : (
                     <div className="flex flex-col gap-4 mt-2">
                       <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Street Address</label>
-                        <input 
-                          type="text" name="addressLine1" value={formData.addressLine1} onChange={handleChange} 
-                          placeholder="House No / Room No, Street Name" 
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Landmark / Locality (Optional)</label>
-                        <input 
-                          type="text" name="addressLine2" value={formData.addressLine2} onChange={handleChange} 
-                          placeholder="Near NIE South Campus" 
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="flex flex-col gap-2">
-                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">City</label>
-                          <input 
-                            type="text" name="city" value={formData.city} onChange={handleChange} 
-                            placeholder="Mysuru" 
-                            className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                          />
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">State</label>
-                          <select 
-                            name="state" value={formData.state} onChange={handleChange} 
-                            className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
-                          >
-                            <option value="Karnataka" className="bg-campus-black">Karnataka</option>
-                            {State.getStatesOfCountry("IN").map(state => (
-                              <option key={state.isoCode} value={state.name} className="bg-campus-black">
-                                {state.name}
-                              </option>
-                            ))}
-                            <option value="Other" className="bg-campus-black">Other (International)</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Pincode</label>
-                        <input 
-                          type="text" name="pincode" value={formData.pincode} onChange={handleChange} 
-                          placeholder="570008" 
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                        />
+                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Primary Campus</label>
+                        <select 
+                          name="campus" value={formData.campus} onChange={handleChange} 
+                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                        >
+                          <option value="South Campus" className="bg-campus-black">South Campus</option>
+                          <option value="North Campus" className="bg-campus-black">North Campus</option>
+                        </select>
                       </div>
                     </div>
                   )}

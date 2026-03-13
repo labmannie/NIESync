@@ -25,8 +25,9 @@ function LoginContent() {
   useEffect(() => {
     if (searchParams.get("error") === "invalid-domain") {
       setError("Access Denied: Please use your @nie.ac.in institutional email.");
+      router.replace("/login");
     }
-  }, [searchParams]);
+  }, [searchParams, router]);
 
   const checkProviderBeforeLogin = async (supabase: any) => {
     // Attempt to lookup the profile's auth_provider without needing RLS bypass if email is matched
@@ -119,7 +120,7 @@ function LoginContent() {
   };
 
   return (
-    <main className="min-h-screen w-full bg-campus-black text-white flex items-center justify-center relative overflow-hidden selection:bg-accent-amber/30 p-4">
+    <main className="min-h-screen w-full bg-campus-black text-white flex items-center justify-center relative overflow-hidden selection:bg-accent-amber/30 p-4 pt-28">
       
       {/* Abstract Background */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-4xl opacity-40 pointer-events-none">
@@ -304,7 +305,7 @@ function LoginContent() {
         </motion.div>
 
         <p className="text-center text-text-secondary text-xs mt-8">
-          Don't have an account? <Link href="/signup" className="text-accent-amber hover:underline font-bold tracking-wide">REQUEST ACCESS</Link><br/><br/>
+          Don't have an account? <Link href="/signup" className="text-accent-amber hover:underline font-bold tracking-wide">CREATE AN ACCOUNT</Link><br/><br/>
           By authenticating, you agree to the Campus Sync <a href="#" className="text-white hover:underline">Terms of Service</a> and <a href="#" className="text-white hover:underline">Privacy Policy</a>.
         </p>
 

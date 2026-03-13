@@ -10,7 +10,7 @@ export default function LostAndFound() {
   ];
 
   return (
-    <main className="min-h-screen w-full bg-campus-black text-white selection:bg-accent-blue/30 flex flex-col">
+    <main className="min-h-screen w-full bg-campus-black text-white selection:bg-accent-blue/30 flex flex-col pt-28">
       <div className="relative z-10 flex flex-col flex-grow px-8 md:px-16 pt-32 pb-12 max-w-[1920px] mx-auto w-full">
         
         {/* Header Section */}

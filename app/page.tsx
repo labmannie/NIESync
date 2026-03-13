@@ -37,11 +37,14 @@ function HeroContent() {
         
         {mounted && !isAuth ? (
           <div className="flex flex-col sm:flex-row gap-5">
-            <Link href="#features" className="flex items-center justify-center gap-3 bg-accent-blue text-white font-bold tracking-wider uppercase text-sm px-10 py-5 clip-diagonal hover:bg-blue-500 transition-colors duration-200 shadow-[0_0_30px_rgba(37,99,235,0.4)] hover:shadow-[0_0_40px_rgba(37,99,235,0.6)]">
-              <span>Explore Features</span>
+            <Link href="/signup" className="flex items-center justify-center gap-3 bg-white text-campus-black font-bold tracking-wider uppercase text-sm px-10 py-5 clip-diagonal hover:bg-gray-200 transition-colors duration-200 shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_40px_rgba(255,255,255,0.4)]">
+              <span>Create Account</span>
             </Link>
-            <Link href="/about" className="flex items-center justify-center gap-3 bg-transparent text-white border border-white/20 px-10 py-5 hover:bg-white/10 transition-colors duration-200 font-bold tracking-wider uppercase text-sm shadow-xl">
-              <span>Read Manifesto</span>
+            <Link href="/login" className="flex items-center justify-center gap-3 bg-accent-blue text-white font-bold tracking-wider uppercase text-sm px-10 py-5 clip-diagonal hover:bg-blue-500 transition-colors duration-200 shadow-[0_0_30px_rgba(37,99,235,0.4)] hover:shadow-[0_0_40px_rgba(37,99,235,0.6)]">
+              <span>Institutional Login</span>
+            </Link>
+            <Link href="#features" className="flex items-center justify-center gap-3 bg-transparent text-white border border-white/20 px-8 py-5 hover:bg-white/10 transition-colors duration-200 font-bold tracking-wider uppercase text-sm shadow-xl">
+              <span>Explore</span>
             </Link>
           </div>
         ) : mounted && isAuth ? (

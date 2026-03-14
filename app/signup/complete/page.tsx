@@ -1,16 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight, ChevronLeft, Check, AlertCircle, Info, Car, Home as HomeIcon, User } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
+import { normalizePhoneNumber, isValidPhoneNumber } from "@/lib/phone";
 import 'react-phone-number-input/style.css';
 import PhoneInput from 'react-phone-number-input';
 
 const TOTAL_STEPS = 3;
+const BATCH_OPTIONS = ["ISE", "CSE", "CSE(AI/ML)", "MECHANICAL", "CIVIL", "ECE", "EEE", "OTHER"];
+const YEAR_OPTIONS = ["I Year", "II Year", "III Year", "IV Year"];
+const VEHICLE_PLATE_REGEX = /^[A-Z]{2}-\d{2}-[A-Z]{1,3}-\d{4}$/;
+
+function formatVehicleNumber(value: string) {
+  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
+  const match = cleaned.match(/^([A-Z]{0,2})(\d{0,2})([A-Z]{0,3})(\d{0,4})$/);
+
+  if (!match) return "";
+
+  return [match[1], match[2], match[3], match[4]].filter(Boolean).join("-");
+}
+
+function isVehicleAlreadyRegisteredError(error: any) {
+  const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
+  return error?.code === "23505" && details.includes("vehicle");
+}
+
+function isDuplicateProfilePrimaryKeyError(error: any) {
+  const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
+  return error?.code === "23505" && details.includes("profiles_pkey");
+}
 
 export default function CompleteProfile() {
   const router = useRouter();
@@ -18,12 +41,16 @@ export default function CompleteProfile() {
   const [direction, setDirection] = useState(1);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
 
   // Form State - Excluding email/password since Google Auth provided it
   const [formData, setFormData] = useState({
+    userType: "Student" as "Student" | "Faculty",
     firstName: "",
     lastName: "",
     usn: "",
+    batch: "",
+    year: "",
     phone: "",
     role: "Day Scholar",
     campus: "South Campus",
@@ -33,25 +60,127 @@ export default function CompleteProfile() {
     vehicleNo: ""
   });
 
+  useEffect(() => {
+    const hydrateExistingProfile = async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      const { data: existingProfile } = await supabase
+        .from("profiles")
+        .select(
+          "first_name, last_name, user_type, usn, batch, year_of_study, phone, role, campus, hostel_name, room_no, has_vehicle, vehicle_no"
+        )
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const baseForm = {
+        userType: "Student" as "Student" | "Faculty",
+        firstName: "",
+        lastName: "",
+        usn: "",
+        batch: "",
+        year: "",
+        phone: "",
+        role: "Day Scholar",
+        campus: "South Campus",
+        hostelName: "NIE North Boys Hostel",
+        roomNo: "",
+        hasVehicle: "No" as "No" | "Yes",
+        vehicleNo: "",
+      };
+
+      let hydratedForm = baseForm;
+
+      if (existingProfile) {
+        const userType =
+          existingProfile.user_type ||
+          (existingProfile.role === "Faculty" ? "Faculty" : "Student");
+
+        hydratedForm = {
+          userType,
+          firstName: existingProfile.first_name || "",
+          lastName: existingProfile.last_name || "",
+          usn: existingProfile.usn || "",
+          batch: existingProfile.batch || "",
+          year: existingProfile.year_of_study || "",
+          phone: existingProfile.phone || "",
+          role:
+            userType === "Faculty"
+              ? "Faculty"
+              : existingProfile.role || "Day Scholar",
+          campus: existingProfile.campus || "South Campus",
+          hostelName: existingProfile.hostel_name || "NIE North Boys Hostel",
+          roomNo: existingProfile.room_no || "",
+          hasVehicle: existingProfile.has_vehicle ? "Yes" : "No" as "Yes" | "No",
+          vehicleNo: existingProfile.vehicle_no || "",
+        };
+      }
+
+      setFormData(hydratedForm);
+      setIsBootstrapping(false);
+    };
+
+    hydrateExistingProfile();
+  }, [router]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    const nextValue = name === "vehicleNo" ? formatVehicleNumber(value) : value;
+    setFormData(prev => ({ ...prev, [name]: nextValue }));
+    if (error) setError("");
+  };
+
+  const handleUserTypeChange = (userType: "Student" | "Faculty") => {
+    setFormData(prev => {
+      if (userType === "Faculty") {
+        return {
+          ...prev,
+          userType,
+          usn: "",
+          batch: "",
+          year: "",
+          role: "Faculty",
+          hostelName: "NIE North Boys Hostel",
+          roomNo: ""
+        };
+      }
+
+      return {
+        ...prev,
+        userType,
+        role: prev.role === "Faculty" ? "Day Scholar" : prev.role
+      };
+    });
     if (error) setError("");
   };
 
   const nextStep = () => {
     if (step === 1) {
-      if (!formData.firstName || !formData.lastName || !formData.usn || !formData.phone) {
+      if (!formData.userType || !formData.firstName || !formData.lastName || !formData.phone) {
         setError("Please fill all required fields.");
         return;
       }
-      if (formData.phone.length < 10) {
+      if (formData.userType === "Student" && (!formData.usn || !formData.batch || !formData.year)) {
+        setError("USN, batch, and year are required for students.");
+        return;
+      }
+      const normalizedPhone = normalizePhoneNumber(formData.phone);
+      if (!isValidPhoneNumber(normalizedPhone)) {
         setError("Please enter a valid full phone number.");
         return;
       }
+      setFormData((prev) => ({ ...prev, phone: normalizedPhone }));
     }
 
     if (step === 2) {
-      if (formData.role === "Hostelite") {
+      if (formData.userType === "Student" && formData.role === "Hostelite") {
         if (!formData.roomNo) {
           setError("Please provide your hostel room number.");
           return;
@@ -77,8 +206,17 @@ export default function CompleteProfile() {
 
   const handleComplete = async (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedPhone = normalizePhoneNumber(formData.phone);
+    if (!isValidPhoneNumber(normalizedPhone)) {
+      setError("Please enter a valid full phone number.");
+      return;
+    }
     if (formData.hasVehicle === "Yes" && !formData.vehicleNo) {
       setError("Please provide your vehicle number.");
+      return;
+    }
+    if (formData.hasVehicle === "Yes" && !VEHICLE_PLATE_REGEX.test(formData.vehicleNo)) {
+      setError("Use a valid plate format: KA-09-AB-1234.");
       return;
     }
 
@@ -96,26 +234,84 @@ export default function CompleteProfile() {
       return;
     }
 
-    // Insert into customized public.profiles table
-    const { error: profileError } = await supabase.from('profiles').insert([
-      {
-        id: user.id,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        usn: formData.usn,
-        phone: formData.phone,
-        role: formData.role,
-        campus: formData.role === 'Hostelite' ? null : formData.campus,
-        hostel_name: formData.role === 'Hostelite' ? formData.hostelName : null,
-        room_no: formData.role === 'Hostelite' ? formData.roomNo : null,
-        has_vehicle: formData.hasVehicle === 'Yes',
-        vehicle_no: formData.hasVehicle === 'Yes' ? formData.vehicleNo : null,
-        auth_provider: 'google'
+    const { data: existingAuthProviderRow } = await supabase
+      .from("profiles")
+      .select("auth_provider, email_verified")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const isStudent = formData.userType === "Student";
+    const normalizedRole = isStudent ? formData.role : "Faculty";
+    const currentProvider =
+      String(user.app_metadata?.provider || "email").toLowerCase() === "google"
+        ? "google"
+        : "email";
+    const existingProvider = String(existingAuthProviderRow?.auth_provider || "").toLowerCase();
+    const nextAuthProvider =
+      !existingProvider
+        ? currentProvider
+        : existingProvider === "both" || existingProvider === currentProvider
+          ? existingProvider
+          : "both";
+
+    const profilePayload = {
+      first_name: formData.firstName,
+      last_name: formData.lastName,
+      user_type: formData.userType,
+      usn: isStudent ? formData.usn.toUpperCase() : null,
+      batch: isStudent ? formData.batch : null,
+      year_of_study: isStudent ? formData.year : null,
+      phone: normalizedPhone,
+      role: normalizedRole,
+      campus: normalizedRole === "Hostelite" ? null : formData.campus,
+      hostel_name: normalizedRole === "Hostelite" ? formData.hostelName : null,
+      room_no: normalizedRole === "Hostelite" ? formData.roomNo : null,
+      has_vehicle: formData.hasVehicle === "Yes",
+      vehicle_no: formData.hasVehicle === "Yes" ? formData.vehicleNo : null,
+      auth_provider: nextAuthProvider,
+      email_verified:
+        currentProvider === "google"
+          ? true
+          : Boolean(existingAuthProviderRow?.email_verified),
+    };
+
+    let profileError: any = null;
+
+    const { data: existingProfileRow, error: existingProfileError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      profileError = existingProfileError;
+    } else if (existingProfileRow) {
+      const { error: updateProfileError } = await supabase
+        .from("profiles")
+        .update(profilePayload)
+        .eq("id", user.id);
+      profileError = updateProfileError;
+    } else {
+      const { error: insertProfileError } = await supabase
+        .from("profiles")
+        .insert([{ id: user.id, ...profilePayload }]);
+      profileError = insertProfileError;
+
+      if (profileError && isDuplicateProfilePrimaryKeyError(profileError)) {
+        const { error: fallbackUpdateError } = await supabase
+          .from("profiles")
+          .update(profilePayload)
+          .eq("id", user.id);
+        profileError = fallbackUpdateError;
       }
-    ]);
+    }
 
     if (profileError) {
-      setError("Failed saving profile details: " + profileError.message);
+      if (isVehicleAlreadyRegisteredError(profileError)) {
+        setError("This vehicle is already registered to another profile.");
+      } else {
+        setError("Failed saving profile details: " + profileError.message);
+      }
       setIsLoading(false);
       return;
     }
@@ -144,6 +340,14 @@ export default function CompleteProfile() {
       transition: { duration: 0.3, ease: "easeIn" as any }
     })
   };
+
+  if (isBootstrapping) {
+    return (
+      <main className="min-h-screen bg-campus-black w-full flex items-center justify-center text-white/50 animate-pulse">
+        Loading secure onboarding...
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen w-full bg-campus-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-accent-blue/30 p-4 pt-28">
@@ -212,6 +416,27 @@ export default function CompleteProfile() {
                     </h2>
                     <p className="text-sm text-text-secondary mt-1">Tell us who you are.</p>
                   </div>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">I am signing up as</label>
+                    <div className="grid grid-cols-2 gap-3 mt-1">
+                      {["Student", "Faculty"].map((type) => (
+                        <div
+                          key={type}
+                          onClick={() => handleUserTypeChange(type as "Student" | "Faculty")}
+                          className={`
+                            cursor-pointer border py-3 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
+                            ${formData.userType === type
+                              ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                              : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
+                            }
+                          `}
+                        >
+                          {type}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div className="flex flex-col gap-2">
@@ -231,14 +456,61 @@ export default function CompleteProfile() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">University Seat Number (USN)</label>
-                    <input 
-                      type="text" name="usn" value={formData.usn} onChange={handleChange} placeholder="4NI20CS000" 
-                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                    />
-                    <p className="text-[10px] text-accent-amber mt-1 flex items-center gap-1 font-bold uppercase tracking-wider"><AlertCircle className="w-3 h-3" /> USN cannot be changed once entered. Please verify carefully.</p>
-                  </div>
+                  {formData.userType === "Student" ? (
+                    <>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">University Seat Number (USN)</label>
+                        <input
+                          type="text"
+                          name="usn"
+                          value={formData.usn}
+                          onChange={handleChange}
+                          placeholder="4NI20CS000"
+                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
+                        />
+                        <p className="text-[10px] text-accent-amber mt-1 flex items-center gap-1 font-bold uppercase tracking-wider"><AlertCircle className="w-3 h-3" /> USN cannot be changed once entered. Please verify carefully.</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Batch / Branch</label>
+                          <select
+                            name="batch"
+                            value={formData.batch}
+                            onChange={handleChange}
+                            className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                          >
+                            <option value="" className="bg-campus-black">Select batch</option>
+                            {BATCH_OPTIONS.map((batch) => (
+                              <option key={batch} value={batch} className="bg-campus-black">
+                                {batch}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Current Year</label>
+                          <select
+                            name="year"
+                            value={formData.year}
+                            onChange={handleChange}
+                            className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                          >
+                            <option value="" className="bg-campus-black">Select year</option>
+                            {YEAR_OPTIONS.map((year) => (
+                              <option key={year} value={year} className="bg-campus-black">
+                                {year}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-xs text-text-secondary bg-white/5 p-3 rounded-sm border border-white/10">
+                      Faculty registration selected. USN, batch, and year are not required.
+                    </div>
+                  )}
 
                   <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
@@ -250,6 +522,12 @@ export default function CompleteProfile() {
                         setFormData(prev => ({...prev, phone: value || ""}));
                         if(error) setError("");
                       }}
+                      onBlur={() => {
+                        setFormData((prev) => ({ ...prev, phone: normalizePhoneNumber(prev.phone) }));
+                      }}
+                      name="phone"
+                      autoComplete="tel"
+                      inputMode="tel"
                       className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus-within:border-accent-blue/50 transition-colors text-white PhoneInputOverride"
                     />
                   </div>
@@ -274,28 +552,34 @@ export default function CompleteProfile() {
                     <p className="text-sm text-text-secondary mt-1">Required for lost item retrieval radius metrics.</p>
                   </div>
                   
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Campus Status</label>
-                    <div className="grid grid-cols-3 gap-3 mt-1">
-                      {["Day Scholar", "Hostelite", "Faculty"].map((role) => (
-                        <div 
-                          key={role}
-                          onClick={() => setFormData(prev => ({ ...prev, role }))}
-                          className={`
-                            cursor-pointer border py-3 px-2 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
-                            ${formData.role === role 
-                              ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]" 
-                              : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                            }
-                          `}
-                        >
-                          {role}
-                        </div>
-                      ))}
+                  {formData.userType === "Student" ? (
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Campus Status</label>
+                      <div className="grid grid-cols-2 gap-3 mt-1">
+                        {["Day Scholar", "Hostelite"].map((role) => (
+                          <div
+                            key={role}
+                            onClick={() => setFormData(prev => ({ ...prev, role }))}
+                            className={`
+                              cursor-pointer border py-3 px-2 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
+                              ${formData.role === role
+                                ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                                : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
+                              }
+                            `}
+                          >
+                            {role}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="text-xs text-text-secondary bg-white/5 p-3 rounded-sm border border-white/10">
+                      Faculty registration selected. Campus status is automatically set to Faculty.
+                    </div>
+                  )}
 
-                  {formData.role === "Hostelite" ? (
+                  {formData.userType === "Student" && formData.role === "Hostelite" ? (
                     <div className="flex flex-col gap-4 mt-2">
                       <div className="flex flex-col gap-2">
                         <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Hostel Name</label>

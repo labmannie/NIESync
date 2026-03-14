@@ -2,15 +2,39 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Shield, Mail, Lock, AlertCircle, ArrowRight } from "lucide-react";
+import { Shield, Mail, Lock, AlertCircle, ArrowRight, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
 
+const DOMAIN_RESTRICTION_MESSAGE = "Access restricted to NIE students and staff only.";
+const GROUP_EMAIL_BLOCK_MESSAGE =
+  "Group email addresses are not allowed for individual accounts.";
+
+async function checkEmailStatus(email: string) {
+  const response = await fetch(
+    `/auth/callback?action=check-email&email=${encodeURIComponent(email)}`,
+    { method: "GET", cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    throw new Error("Unable to verify this email right now. Please try again.");
+  }
+
+  return (await response.json()) as {
+    exists: boolean;
+    providers: string[];
+    domainAllowed: boolean;
+    blocked: boolean;
+    blockedReason?: string | null;
+  };
+}
+
 function LoginContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   
   const [loginMode, setLoginMode] = useState<"password" | "magiclink">("password");
   const [magicLinkSent, setMagicLinkSent] = useState(false);
@@ -18,90 +42,137 @@ function LoginContent() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
   
   const router = useRouter();
   const searchParams = useSearchParams();
 
   useEffect(() => {
     if (searchParams.get("error") === "invalid-domain") {
-      setError("Access Denied: Please use your @nie.ac.in institutional email.");
+      setError(DOMAIN_RESTRICTION_MESSAGE);
+      setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
+      router.replace("/login");
+    }
+    if (searchParams.get("error") === "blocked-group") {
+      setError(GROUP_EMAIL_BLOCK_MESSAGE);
+      setToastMessage(GROUP_EMAIL_BLOCK_MESSAGE);
+      router.replace("/login");
+    }
+    if (searchParams.get("error") === "session-revoked") {
+      setError("This session was signed out from another device. Please log in again.");
+      router.replace("/login");
+    }
+    if (searchParams.get("reauth") === "delete-account") {
+      setSuccess("Please sign in again to continue with account deletion.");
+      router.replace("/login");
+    }
+    if (searchParams.get("account") === "deleted") {
+      setSuccess("Your account has been deleted successfully.");
+      router.replace("/login");
+    }
+    if (searchParams.get("session") === "logged-out") {
+      setSuccess("You have been logged out from this session.");
       router.replace("/login");
     }
   }, [searchParams, router]);
 
-  const checkProviderBeforeLogin = async (supabase: any) => {
-    // Attempt to lookup the profile's auth_provider without needing RLS bypass if email is matched
-    // Requires a secure RPC or we can just attempt login and catch the specific Error.
-    // Easiest method within pure client constraints: Attempt auth, intercept "Invalid login credentials".
-  };
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = window.setTimeout(() => setToastMessage(""), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSuccess("");
     
-    // Simulate domain restriction natively
-    if (!email.endsWith("@nie.ac.in")) {
-      setError("Access Denied: Only @nie.ac.in institutional emails are authorized.");
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail.endsWith("@nie.ac.in")) {
+      setError(DOMAIN_RESTRICTION_MESSAGE);
+      setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
       return;
     }
 
     setIsLoading(true);
     const supabase = createClient();
-    
-    // MAGIC LINK FLOW (Send Magic Link)
-    if (loginMode === "magiclink" && !magicLinkSent) {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: false, // Explicitly deny signup from login page
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+
+    try {
+      const emailStatus = await checkEmailStatus(normalizedEmail);
+
+      if (!emailStatus.domainAllowed) {
+        setError(DOMAIN_RESTRICTION_MESSAGE);
+        setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
+        return;
+      }
+
+      if (emailStatus.blocked) {
+        const blockedMessage = emailStatus.blockedReason || GROUP_EMAIL_BLOCK_MESSAGE;
+        setError(blockedMessage);
+        setToastMessage(blockedMessage);
+        return;
+      }
+
+      if (!emailStatus.exists) {
+        setError("Account not found. Please sign up first.");
+        return;
+      }
+
+      setEmail(normalizedEmail);
+
+      // ACCESS LINK FLOW
+      if (loginMode === "magiclink" && !magicLinkSent) {
+        const { error } = await supabase.auth.signInWithOtp({
+          email: normalizedEmail,
+          options: {
+            shouldCreateUser: false, // Explicitly deny signup from login page
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          }
+        });
+
+        if (error) {
+          if (error.message.includes("Signups not allowed")) {
+            setError("Account not found. Please request access (Sign Up) first.");
+          } else {
+            setError(error.message);
+          }
+        } else {
+          setSuccess("Access Link sent! Check your institutional email inbox to securely sign in without a password.");
+          setMagicLinkSent(true);
         }
+        return;
+      }
+
+      // PASSWORD FLOW
+      if (password.length < 6) {
+        setError("Invalid credentials. Password must be at least 6 characters.");
+        return;
+      }
+
+      // Attempt Sign In
+      const { error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
       });
 
       if (error) {
-        if (error.message.includes("Signups not allowed")) {
-          setError("Account not found. Please request access (Sign Up) first.");
+        // Identity Header check heuristic
+        // Supabase returns standard "Invalid login credentials" if password fails or if it's purely an OAuth account.
+        if (error.message.includes("Invalid login credentials")) {
+          setError("Invalid credentials. If you previously registered using Google Workspace or an Access Link, please use that method instead.");
         } else {
           setError(error.message);
         }
-      } else {
-        setSuccess("Magic Link dispatched! Check your institutional email inbox to instantly authenticate safely without a password.");
-        setMagicLinkSent(true);
+        return;
       }
+
+      // Success redirect
+      router.push("/lost-and-found");
+    } catch (err: any) {
+      setError(err.message || "Unable to verify email right now.");
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    // PASSWORD FLOW
-    if (password.length < 6) {
-      setError("Invalid credentials. Password must be at least 6 characters.");
-      setIsLoading(false);
-      return;
-    }
-
-    // Attempt Sign In
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      // Identity Header check heuristic 
-      // Supabase returns standard "Invalid login credentials" if pasword fails or if it's purely an OAuth account.
-      // We will provide a smart hint to the user if this error occurs.
-      if (error.message.includes("Invalid login credentials")) {
-        setError("Invalid credentials. If you previously registered using Google Workspace or Magic Link, please use those respective options instead.");
-      } else {
-        setError(error.message);
-      }
-      
-      setIsLoading(false);
-      return;
-    }
-
-    // Success redirect
-    router.push("/lost-and-found");
   };
 
   const handleGoogleAuth = async () => {
@@ -111,16 +182,36 @@ function LoginContent() {
       provider: 'google',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
+        queryParams: {
+          prompt: "select_account consent",
+        },
       }
     });
 
     if (error) {
-      setError(error.message);
+      if (error.message.toLowerCase().includes("invalid domain")) {
+        setError(DOMAIN_RESTRICTION_MESSAGE);
+        setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
+      } else {
+        setError(error.message);
+      }
     }
   };
 
   return (
     <main className="min-h-screen w-full bg-campus-black text-white flex items-center justify-center relative overflow-hidden selection:bg-accent-amber/30 p-4 pt-28">
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -18 }}
+            className="fixed top-24 right-4 z-50 bg-red-500/95 text-white text-sm px-4 py-3 rounded-sm shadow-2xl border border-red-300/40"
+          >
+            {toastMessage}
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Abstract Background */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-4xl opacity-40 pointer-events-none">
@@ -192,8 +283,13 @@ function LoginContent() {
                   value={email}
                   disabled={magicLinkSent}
                   onChange={(e) => setEmail(e.target.value)}
+                  onBlur={(event) => setEmail(event.target.value.trim().toLowerCase())}
                   placeholder="name.yr@nie.ac.in" 
                   className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20 disabled:opacity-50"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   required
                 />
               </div>
@@ -212,19 +308,32 @@ function LoginContent() {
                   <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex justify-between">
                     <span>Secure Password</span>
                     <button type="button" onClick={() => { setLoginMode("magiclink"); setError(""); }} className="text-accent-amber hover:underline tracking-widest uppercase text-[10px]">
-                      Use Magic Link?
+                      Use Access Link?
                     </button>
                   </label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
                     <input 
-                      type="password" 
+                      type={showPassword ? "text" : "password"} 
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••" 
-                      className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20"
+                      placeholder="********" 
+                      className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-12 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20"
+                      autoComplete="current-password"
                       required={loginMode === "password"}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-white transition-colors"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="w-5 h-5" />
+                      ) : (
+                        <Eye className="w-5 h-5" />
+                      )}
+                    </button>
                   </div>
                 </motion.div>
               )}
@@ -244,7 +353,7 @@ function LoginContent() {
                   </div>
                   <div className="flex items-center gap-2 mt-2 text-text-secondary bg-white/5 p-3 rounded-sm border border-white/5">
                     <AlertCircle className="w-4 h-4 shrink-0 text-accent-amber" />
-                    <span className="text-xs leading-relaxed">We will dispatch a secure Magic Link to your institutional inbox. Click it to log in without a password.</span>
+                    <span className="text-xs leading-relaxed">We will send a secure NIE Sync Access Link to your institutional inbox. Click it to sign in without a password.</span>
                   </div>
                 </motion.div>
               )}
@@ -275,7 +384,7 @@ function LoginContent() {
                   <span className="w-5 h-5 border-2 border-campus-black/30 border-t-campus-black rounded-full animate-spin"></span>
                 ) : (
                   <>
-                    <span>{loginMode === "magiclink" ? "Dispatch Magic Link" : "Authenticate"}</span>
+                    <span>{loginMode === "magiclink" ? "Send Access Link" : "Authenticate"}</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -306,7 +415,10 @@ function LoginContent() {
 
         <p className="text-center text-text-secondary text-xs mt-8">
           Don't have an account? <Link href="/signup" className="text-accent-amber hover:underline font-bold tracking-wide">CREATE AN ACCOUNT</Link><br/><br/>
-          By authenticating, you agree to the Campus Sync <a href="#" className="text-white hover:underline">Terms of Service</a> and <a href="#" className="text-white hover:underline">Privacy Policy</a>.
+          By authenticating, you agree to the NIE Sync{" "}
+          <Link href="/terms-of-service" className="text-white hover:underline">Terms of Service</Link>{" "}
+          and{" "}
+          <Link href="/privacy-policy" className="text-white hover:underline">Privacy Policy</Link>.
         </p>
 
       </div>
@@ -321,3 +433,4 @@ export default function Login() {
     </Suspense>
   )
 }
+

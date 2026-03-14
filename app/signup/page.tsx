@@ -2,15 +2,60 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Shield, ChevronRight, ChevronLeft, Check, AlertCircle, Info, Car, Home as HomeIcon, User, Mail, Lock } from "lucide-react";
+import { Shield, ChevronRight, ChevronLeft, Check, AlertCircle, Info, Car, Home as HomeIcon, User, Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
+import { normalizePhoneNumber, isValidPhoneNumber } from "@/lib/phone";
 import 'react-phone-number-input/style.css';
 import PhoneInput from 'react-phone-number-input';
 
 const TOTAL_STEPS = 4;
+const BATCH_OPTIONS = ["ISE", "CSE", "CSE(AI/ML)", "MECHANICAL", "CIVIL", "ECE", "EEE", "OTHER"];
+const YEAR_OPTIONS = ["I Year", "II Year", "III Year", "IV Year"];
+const VEHICLE_PLATE_REGEX = /^[A-Z]{2}-\d{2}-[A-Z]{1,3}-\d{4}$/;
+const DOMAIN_RESTRICTION_MESSAGE = "Access restricted to NIE students and staff only.";
+const GROUP_EMAIL_BLOCK_MESSAGE =
+  "Group email addresses are not allowed for individual accounts.";
+
+function formatVehicleNumber(value: string) {
+  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
+  const match = cleaned.match(/^([A-Z]{0,2})(\d{0,2})([A-Z]{0,3})(\d{0,4})$/);
+
+  if (!match) return "";
+
+  return [match[1], match[2], match[3], match[4]].filter(Boolean).join("-");
+}
+
+function isVehicleAlreadyRegisteredError(error: any) {
+  const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
+  return error?.code === "23505" && details.includes("vehicle");
+}
+
+function isDuplicateProfilePrimaryKeyError(error: any) {
+  const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
+  return error?.code === "23505" && details.includes("profiles_pkey");
+}
+
+async function checkEmailStatus(email: string) {
+  const response = await fetch(
+    `/auth/callback?action=check-email&email=${encodeURIComponent(email)}`,
+    { method: "GET", cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    throw new Error("Unable to verify this email right now. Please try again.");
+  }
+
+  return (await response.json()) as {
+    exists: boolean;
+    providers: string[];
+    domainAllowed: boolean;
+    blocked: boolean;
+    blockedReason?: string | null;
+  };
+}
 
 function SignupContent() {
   const router = useRouter();
@@ -21,23 +66,41 @@ function SignupContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [signupMode, setSignupMode] = useState<"password" | "magiclink">("password");
   const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
 
   useEffect(() => {
     if (searchParams.get("error") === "invalid-domain") {
-      setError("Access Denied: Please use your @nie.ac.in institutional email.");
+      setError(DOMAIN_RESTRICTION_MESSAGE);
+      setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
+      router.replace("/signup");
+    }
+    if (searchParams.get("error") === "blocked-group") {
+      setError(GROUP_EMAIL_BLOCK_MESSAGE);
+      setToastMessage(GROUP_EMAIL_BLOCK_MESSAGE);
       router.replace("/signup");
     }
   }, [searchParams, router]);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = window.setTimeout(() => setToastMessage(""), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
 
   // Form State
   const [formData, setFormData] = useState({
     email: "",
     password: "",
+    userType: "Student" as "Student" | "Faculty",
     firstName: "",
     lastName: "",
     usn: "",
+    batch: "",
+    year: "",
     phone: "",
-    role: "Day Scholar", // Day Scholar, Hostelite, Faculty
+    role: "Day Scholar", // Day Scholar or Hostelite for students, Faculty for faculty users
     campus: "South Campus",
     hostelName: "NIE North Boys Hostel",
     roomNo: "",
@@ -46,59 +109,133 @@ function SignupContent() {
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    const nextValue = name === "vehicleNo" ? formatVehicleNumber(value) : value;
+    setFormData(prev => ({ ...prev, [name]: nextValue }));
+    if (error) setError("");
+  };
+
+  const handleUserTypeChange = (userType: "Student" | "Faculty") => {
+    setFormData(prev => {
+      if (userType === "Faculty") {
+        return {
+          ...prev,
+          userType,
+          usn: "",
+          batch: "",
+          year: "",
+          role: "Faculty",
+          hostelName: "NIE North Boys Hostel",
+          roomNo: ""
+        };
+      }
+
+      return {
+        ...prev,
+        userType,
+        role: prev.role === "Faculty" ? "Day Scholar" : prev.role
+      };
+    });
     if (error) setError("");
   };
 
   const nextStep = async () => {
     // Validation per step
     if (step === 1) {
-      if (!formData.email.endsWith("@nie.ac.in")) {
-        setError("Only @nie.ac.in institutional emails are authorized.");
+      const normalizedEmail = formData.email.trim().toLowerCase();
+      if (!acceptedPolicies) {
+        setError("Please accept the Terms of Service and Privacy Policy to continue.");
+        return;
+      }
+      if (!normalizedEmail.endsWith("@nie.ac.in")) {
+        setError(DOMAIN_RESTRICTION_MESSAGE);
+        setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
         return;
       }
 
-      if (signupMode === "password") {
-        if (formData.password.length < 6) {
-          setError("Password must be at least 6 characters.");
+      setIsLoading(true);
+      setError("");
+
+      try {
+        const emailStatus = await checkEmailStatus(normalizedEmail);
+        if (!emailStatus.domainAllowed) {
+          setError(DOMAIN_RESTRICTION_MESSAGE);
+          setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
           return;
         }
-      } else {
-        // MAGIC LINK SIGNUP FLOW
-        setIsLoading(true);
-        setError("");
-        const supabase = createClient();
-        const { error } = await supabase.auth.signInWithOtp({
-          email: formData.email,
-          options: {
-            shouldCreateUser: true, // Allow user creation for Signup
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          }
-        });
-
-        if (error) {
-          setError(error.message);
-        } else {
-          setMagicLinkSent(true);
+        if (emailStatus.blocked) {
+          const blockedMessage = emailStatus.blockedReason || GROUP_EMAIL_BLOCK_MESSAGE;
+          setError(blockedMessage);
+          setToastMessage(blockedMessage);
+          return;
         }
-        setIsLoading(false);
+
+        if (emailStatus.exists) {
+          if (emailStatus.providers?.includes("google")) {
+            setError(
+              "This email already uses Google Sign-In. Use Google to log in, then set a password in Profile to link both methods."
+            );
+          } else {
+            setError("This email is already registered. Please log in instead.");
+          }
+          return;
+        }
+
+        if (signupMode === "password") {
+          if (formData.password.length < 6) {
+            setError("Password must be at least 6 characters.");
+            return;
+          }
+          setFormData((prev) => ({ ...prev, email: normalizedEmail }));
+        } else {
+          // ACCESS LINK SIGNUP FLOW
+          const supabase = createClient();
+          const { error } = await supabase.auth.signInWithOtp({
+            email: normalizedEmail,
+            options: {
+              shouldCreateUser: true,
+              emailRedirectTo: `${window.location.origin}/auth/callback`,
+            },
+          });
+
+          if (error) {
+            if (error.message.toLowerCase().includes("already")) {
+              setError("This email is already registered. Please log in instead.");
+            } else {
+              setError(error.message);
+            }
+          } else {
+            setMagicLinkSent(true);
+          }
+          return;
+        }
+      } catch (err: any) {
+        setError(err.message || "Unable to verify email right now.");
         return;
+      } finally {
+        setIsLoading(false);
       }
     }
     
     if (step === 2) {
-      if (!formData.firstName || !formData.lastName || !formData.usn || !formData.phone) {
+      if (!formData.userType || !formData.firstName || !formData.lastName || !formData.phone) {
         setError("Please fill all required fields.");
         return;
       }
-      if (formData.phone.length < 10) {
+      if (formData.userType === "Student" && (!formData.usn || !formData.batch || !formData.year)) {
+        setError("USN, batch, and year are required for students.");
+        return;
+      }
+      const normalizedPhone = normalizePhoneNumber(formData.phone);
+      if (!isValidPhoneNumber(normalizedPhone)) {
         setError("Please enter a valid full phone number.");
         return;
       }
+      setFormData((prev) => ({ ...prev, phone: normalizedPhone }));
     }
 
     if (step === 3) {
-      if (formData.role === "Hostelite") {
+      if (formData.userType === "Student" && formData.role === "Hostelite") {
         if (!formData.roomNo) {
           setError("Please provide your hostel room number.");
           return;
@@ -124,8 +261,17 @@ function SignupContent() {
 
   const handleComplete = async (e: React.FormEvent) => {
     e.preventDefault();
+    const normalizedPhone = normalizePhoneNumber(formData.phone);
+    if (!isValidPhoneNumber(normalizedPhone)) {
+      setError("Please enter a valid full phone number.");
+      return;
+    }
     if (formData.hasVehicle === "Yes" && !formData.vehicleNo) {
       setError("Please provide your vehicle number.");
+      return;
+    }
+    if (formData.hasVehicle === "Yes" && !VEHICLE_PLATE_REGEX.test(formData.vehicleNo)) {
+      setError("Use a valid plate format: KA-09-AB-1234.");
       return;
     }
 
@@ -141,7 +287,11 @@ function SignupContent() {
     });
 
     if (authError) {
-      setError(authError.message);
+      if (authError.message.toLowerCase().includes("already")) {
+        setError("This email is already registered. Please log in instead.");
+      } else {
+        setError(authError.message);
+      }
       setIsLoading(false);
       return;
     }
@@ -152,28 +302,70 @@ function SignupContent() {
       return;
     }
 
-    // Step 2: Insert into customized public.profiles table
-    const { error: profileError } = await supabase.from('profiles').insert([
-      {
-        id: authData.user.id,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        usn: formData.usn,
-        phone: formData.phone,
-        role: formData.role,
-        campus: formData.role === 'Hostelite' ? null : formData.campus,
-        hostel_name: formData.role === 'Hostelite' ? formData.hostelName : null,
-        room_no: formData.role === 'Hostelite' ? formData.roomNo : null,
-        has_vehicle: formData.hasVehicle === 'Yes',
-        vehicle_no: formData.hasVehicle === 'Yes' ? formData.vehicleNo : null,
-        auth_provider: 'email'
+    if (!authData.session) {
+      setError(
+        "Signup confirmation is enabled in Supabase. Disable 'Confirm email' for instant signup flow."
+      );
+      setIsLoading(false);
+      return;
+    }
+
+    const isStudent = formData.userType === "Student";
+    const normalizedRole = isStudent ? formData.role : "Faculty";
+    const profilePayload = {
+      first_name: formData.firstName,
+      last_name: formData.lastName,
+      user_type: formData.userType,
+      usn: isStudent ? formData.usn.toUpperCase() : null,
+      batch: isStudent ? formData.batch : null,
+      year_of_study: isStudent ? formData.year : null,
+      phone: normalizedPhone,
+      role: normalizedRole,
+      campus: normalizedRole === "Hostelite" ? null : formData.campus,
+      hostel_name: normalizedRole === "Hostelite" ? formData.hostelName : null,
+      room_no: normalizedRole === "Hostelite" ? formData.roomNo : null,
+      has_vehicle: formData.hasVehicle === "Yes",
+      vehicle_no: formData.hasVehicle === "Yes" ? formData.vehicleNo : null,
+      auth_provider: "email",
+      email_verified: false,
+    };
+
+    // Persist profile immediately after signup.
+    const { data: existingProfile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", authData.user.id)
+      .maybeSingle();
+
+    let profileError: any = null;
+
+    if (existingProfile) {
+      const { error } = await supabase
+        .from("profiles")
+        .update(profilePayload)
+        .eq("id", authData.user.id);
+      profileError = error;
+    } else {
+      const { error } = await supabase
+        .from("profiles")
+        .insert([{ id: authData.user.id, ...profilePayload }]);
+      profileError = error;
+
+      if (profileError && isDuplicateProfilePrimaryKeyError(profileError)) {
+        const { error: fallbackUpdateError } = await supabase
+          .from("profiles")
+          .update(profilePayload)
+          .eq("id", authData.user.id);
+        profileError = fallbackUpdateError;
       }
-    ]);
+    }
 
     if (profileError) {
-      // If profile creation fails, we might still have created the auth user.
-      // Ideally rollback or inform.
-      setError("Auth succeeded but Profile creation failed: " + profileError.message);
+      if (isVehicleAlreadyRegisteredError(profileError)) {
+        setError("This vehicle is already registered to another profile.");
+      } else {
+        setError("Auth succeeded but profile save failed: " + profileError.message);
+      }
       setIsLoading(false);
       return;
     }
@@ -184,12 +376,19 @@ function SignupContent() {
   };
 
   const handleGoogleAuth = async () => {
+    if (!acceptedPolicies) {
+      setError("Please accept the Terms of Service and Privacy Policy to continue.");
+      return;
+    }
     setError("");
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
+        queryParams: {
+          prompt: "select_account consent",
+        },
       }
     });
 
@@ -220,6 +419,18 @@ function SignupContent() {
 
   return (
     <main className="min-h-screen w-full bg-campus-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-accent-blue/30 p-4 pt-28">
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -18 }}
+            className="fixed top-24 right-4 z-50 bg-red-500/95 text-white text-sm px-4 py-3 rounded-sm shadow-2xl border border-red-300/40"
+          >
+            {toastMessage}
+          </motion.div>
+        )}
+      </AnimatePresence>
       
       {/* Abstract Backgrounds */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-5xl opacity-30 pointer-events-none">
@@ -296,8 +507,16 @@ function SignupContent() {
                         value={formData.email}
                         disabled={magicLinkSent}
                         onChange={handleChange}
+                        onBlur={(event) => {
+                          const normalizedEmail = event.target.value.trim().toLowerCase();
+                          setFormData((prev) => ({ ...prev, email: normalizedEmail }));
+                        }}
                         placeholder="name.yr@nie.ac.in" 
                         className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 disabled:opacity-50"
+                        autoComplete="email"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
                         autoFocus
                       />
                     </div>
@@ -316,20 +535,33 @@ function SignupContent() {
                           <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex justify-between">
                             <span>Secure Password</span>
                             <button type="button" onClick={() => { setSignupMode("magiclink"); setError(""); }} className="text-accent-amber hover:underline tracking-widest uppercase text-[10px]">
-                              Use Magic Link?
+                              Use Access Link?
                             </button>
                           </label>
                           <div className="relative">
                             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
                             <input 
-                              type="password" 
+                              type={showPassword ? "text" : "password"} 
                               name="password"
                               value={formData.password}
                               onChange={handleChange}
-                              placeholder="••••••••" 
-                              className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                              placeholder="********" 
+                              className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-12 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                              autoComplete="new-password"
                               required={signupMode === "password"}
                             />
+                            <button
+                              type="button"
+                              onClick={() => setShowPassword((prev) => !prev)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-white transition-colors"
+                              aria-label={showPassword ? "Hide password" : "Show password"}
+                            >
+                              {showPassword ? (
+                                <EyeOff className="w-5 h-5" />
+                              ) : (
+                                <Eye className="w-5 h-5" />
+                              )}
+                            </button>
                           </div>
                         </motion.div>
                       )}
@@ -349,11 +581,33 @@ function SignupContent() {
                           </div>
                           <div className="flex items-center gap-2 mt-2 text-text-secondary bg-white/5 p-3 rounded-sm border border-white/5">
                             <AlertCircle className="w-4 h-4 shrink-0 text-accent-amber" />
-                            <span className="text-xs leading-relaxed">We will dispatch a secure Magic Link to your institutional inbox. Click it to authenticate instantly without a password.</span>
+                            <span className="text-xs leading-relaxed">We will send a secure NIE Sync Access Link to your institutional inbox. Click it to continue without a password.</span>
                           </div>
                         </motion.div>
                       )}
                     </AnimatePresence>
+                  )}
+
+                  {!magicLinkSent && (
+                    <label className="mt-2 flex items-start gap-3 text-xs text-text-secondary leading-relaxed">
+                      <input
+                        type="checkbox"
+                        checked={acceptedPolicies}
+                        onChange={(event) => setAcceptedPolicies(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border border-white/20 bg-black/50 accent-accent-blue"
+                      />
+                      <span>
+                        I agree to the{" "}
+                        <Link href="/terms-of-service" target="_blank" className="text-white hover:underline">
+                          Terms of Service
+                        </Link>{" "}
+                        and{" "}
+                        <Link href="/privacy-policy" target="_blank" className="text-white hover:underline">
+                          Privacy Policy
+                        </Link>
+                        .
+                      </span>
+                    </label>
                   )}
 
                   {magicLinkSent && (
@@ -366,7 +620,7 @@ function SignupContent() {
                     >
                       <div className="flex items-start gap-2 text-green-400 bg-green-500/10 p-4 rounded-sm border border-green-500/30">
                         <Shield className="w-5 h-5 shrink-0 mt-0.5" />
-                        <span className="text-sm font-semibold leading-relaxed">Magic Link Dispatched!<br />Please check your institutional email inbox to smoothly continue your identity registration.</span>
+                        <span className="text-sm font-semibold leading-relaxed">Access Link Sent!<br />Please check your institutional email inbox to continue your identity registration.</span>
                       </div>
                       <button type="button" onClick={() => { setMagicLinkSent(false); setError(""); }} className="bg-white/5 hover:bg-white/10 uppercase tracking-widest py-3 mt-4 font-bold text-xs text-text-secondary rounded-sm transition-colors border border-white/10">
                         Change Email / Resend
@@ -385,7 +639,8 @@ function SignupContent() {
                       <button 
                         type="button" 
                         onClick={handleGoogleAuth}
-                        className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white font-semibold py-3.5 rounded-sm transition-colors flex items-center justify-center gap-3"
+                        disabled={!acceptedPolicies}
+                        className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white font-semibold py-3.5 rounded-sm transition-colors flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
                           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -395,6 +650,11 @@ function SignupContent() {
                         </svg>
                         <span>Google Workplace (@nie.ac.in)</span>
                       </button>
+                      {!acceptedPolicies && (
+                        <p className="text-[11px] text-accent-amber mt-2">
+                          Accept Terms and Privacy Policy to continue with Google.
+                        </p>
+                      )}
                     </>
                   )}
                 </motion.div>
@@ -417,6 +677,27 @@ function SignupContent() {
                     </h2>
                     <p className="text-sm text-text-secondary mt-1">Tell us who you are.</p>
                   </div>
+
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">I am signing up as</label>
+                    <div className="grid grid-cols-2 gap-3 mt-1">
+                      {["Student", "Faculty"].map((type) => (
+                        <div
+                          key={type}
+                          onClick={() => handleUserTypeChange(type as "Student" | "Faculty")}
+                          className={`
+                            cursor-pointer border py-3 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
+                            ${formData.userType === type
+                              ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                              : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
+                            }
+                          `}
+                        >
+                          {type}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div className="flex flex-col gap-2">
@@ -436,28 +717,81 @@ function SignupContent() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">University Seat Number (USN)</label>
-                    <input 
-                      type="text" name="usn" value={formData.usn} onChange={handleChange} placeholder="4NI20CS000" 
-                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                    />
-                    <p className="text-[10px] text-accent-amber mt-1 flex items-center gap-1 font-bold uppercase tracking-wider"><AlertCircle className="w-3 h-3" /> USN cannot be changed once entered. Please verify carefully.</p>
-                  </div>
+                  {formData.userType === "Student" ? (
+                    <>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">University Seat Number (USN)</label>
+                        <input
+                          type="text"
+                          name="usn"
+                          value={formData.usn}
+                          onChange={handleChange}
+                          placeholder="4NI20CS000"
+                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
+                        />
+                        <p className="text-[10px] text-accent-amber mt-1 flex items-center gap-1 font-bold uppercase tracking-wider"><AlertCircle className="w-3 h-3" /> USN cannot be changed once entered. Please verify carefully.</p>
+                      </div>
 
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
-                      <PhoneInput
-                        international
-                        defaultCountry="IN"
-                        value={formData.phone}
-                        onChange={(value) => {
-                          setFormData(prev => ({...prev, phone: value || ""}));
-                          if(error) setError("");
-                        }}
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus-within:border-accent-blue/50 transition-colors text-white PhoneInputOverride"
-                      />
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Batch / Branch</label>
+                          <select
+                            name="batch"
+                            value={formData.batch}
+                            onChange={handleChange}
+                            className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                          >
+                            <option value="" className="bg-campus-black">Select batch</option>
+                            {BATCH_OPTIONS.map((batch) => (
+                              <option key={batch} value={batch} className="bg-campus-black">
+                                {batch}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Current Year</label>
+                          <select
+                            name="year"
+                            value={formData.year}
+                            onChange={handleChange}
+                            className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                          >
+                            <option value="" className="bg-campus-black">Select year</option>
+                            {YEAR_OPTIONS.map((year) => (
+                              <option key={year} value={year} className="bg-campus-black">
+                                {year}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-xs text-text-secondary bg-white/5 p-3 rounded-sm border border-white/10">
+                      Faculty registration selected. USN, batch, and year are not required.
                     </div>
+                  )}
+
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
+                    <PhoneInput
+                      international
+                      defaultCountry="IN"
+                      value={formData.phone}
+                      onChange={(value) => {
+                        setFormData(prev => ({...prev, phone: value || ""}));
+                        if(error) setError("");
+                      }}
+                      onBlur={() => {
+                        setFormData((prev) => ({ ...prev, phone: normalizePhoneNumber(prev.phone) }));
+                      }}
+                      name="phone"
+                      autoComplete="tel"
+                      inputMode="tel"
+                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus-within:border-accent-blue/50 transition-colors text-white PhoneInputOverride"
+                    />
+                  </div>
                 </motion.div>
               )}
 
@@ -479,28 +813,34 @@ function SignupContent() {
                     <p className="text-sm text-text-secondary mt-1">Required for lost item retrieval radius metrics.</p>
                   </div>
                   
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Campus Status</label>
-                    <div className="grid grid-cols-3 gap-3 mt-1">
-                      {["Day Scholar", "Hostelite", "Faculty"].map((role) => (
-                        <div 
-                          key={role}
-                          onClick={() => setFormData(prev => ({ ...prev, role }))}
-                          className={`
-                            cursor-pointer border py-3 px-2 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
-                            ${formData.role === role 
-                              ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]" 
-                              : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                            }
-                          `}
-                        >
-                          {role}
-                        </div>
-                      ))}
+                  {formData.userType === "Student" ? (
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Campus Status</label>
+                      <div className="grid grid-cols-2 gap-3 mt-1">
+                        {["Day Scholar", "Hostelite"].map((role) => (
+                          <div
+                            key={role}
+                            onClick={() => setFormData(prev => ({ ...prev, role }))}
+                            className={`
+                              cursor-pointer border py-3 px-2 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
+                              ${formData.role === role
+                                ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                                : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
+                              }
+                            `}
+                          >
+                            {role}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="text-xs text-text-secondary bg-white/5 p-3 rounded-sm border border-white/10">
+                      Faculty registration selected. Campus status is automatically set to Faculty.
+                    </div>
+                  )}
 
-                  {formData.role === "Hostelite" ? (
+                  {formData.userType === "Student" && formData.role === "Hostelite" ? (
                     <div className="flex flex-col gap-4 mt-2">
                       <div className="flex flex-col gap-2">
                         <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Hostel Name</label>
@@ -623,14 +963,14 @@ function SignupContent() {
             {step < TOTAL_STEPS && !magicLinkSent && (
               <button 
                 onClick={nextStep}
-                disabled={isLoading}
-                className="bg-white text-campus-black font-black uppercase tracking-widest text-xs px-8 py-3.5 clip-diagonal hover:bg-gray-200 transition-colors flex items-center gap-2"
+                disabled={isLoading || (step === 1 && !acceptedPolicies)}
+                className="bg-white text-campus-black font-black uppercase tracking-widest text-xs px-8 py-3.5 clip-diagonal hover:bg-gray-200 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {isLoading && step === 1 ? (
                   <span className="w-4 h-4 border-2 border-campus-black/30 border-t-campus-black rounded-full animate-spin"></span>
                 ) : (
                   <>
-                    {step === 1 && signupMode === "magiclink" ? "Dispatch Link" : "Proceed"}
+                    {step === 1 && signupMode === "magiclink" ? "Send Access Link" : "Proceed"}
                     <ChevronRight className="w-4 h-4" />
                   </>
                 )}
@@ -657,7 +997,15 @@ function SignupContent() {
         </div>
         
         <p className="text-center text-text-secondary text-xs mt-8">
-          Already verified? <Link href="/login" className="text-white hover:underline font-bold tracking-wide">ACCESS PORTAL</Link>
+          Already verified? <Link href="/login" className="text-white hover:underline font-bold tracking-wide">ACCESS PORTAL</Link><br/><br/>
+          Need policy details?{" "}
+          <Link href="/terms-of-service" className="text-white hover:underline">
+            Terms
+          </Link>
+          {" "}and{" "}
+          <Link href="/privacy-policy" className="text-white hover:underline">
+            Privacy
+          </Link>
         </p>
 
       </div>
@@ -672,3 +1020,4 @@ export default function Signup() {
     </Suspense>
   )
 }
+

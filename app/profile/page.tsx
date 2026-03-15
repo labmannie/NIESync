@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ShieldCheck, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle } from "lucide-react";
+import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ArrowRight, ShieldCheck, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -991,40 +991,41 @@ export default function ProfilePage() {
           <div className="flex-1 w-full min-w-0">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-5">
               <div className="text-center md:text-left min-w-0">
-                <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight leading-tight break-words">
-                  {profile?.first_name} <span className="text-white/40">{profile?.last_name}</span>
+                <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight leading-tight break-words flex flex-wrap items-center justify-center md:justify-start gap-3">
+                  <span>{profile?.first_name} <span className="text-white/40">{profile?.last_name}</span></span>
+                  <div
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border shrink-0 ${
+                      isVerifiedUser
+                        ? "bg-green-500/10 text-green-400 border-green-500/30"
+                        : "bg-accent-amber/10 text-accent-amber border-accent-amber/30"
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    {isVerifiedUser ? "Verified" : "Unverified"}
+                  </div>
                 </h1>
-                <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-text-secondary font-bold">
-                    Member Since
-                  </span>
-                  <span className="text-xs md:text-sm font-semibold text-white">
-                    {memberSince || "--"}
-                  </span>
+                <div className="mt-4 flex flex-col md:flex-row items-center md:items-start gap-3">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                    <span className="text-[10px] uppercase tracking-[0.2em] text-text-secondary font-bold">
+                      Member Since
+                    </span>
+                    <span className="text-xs md:text-sm font-semibold text-white">
+                      {memberSince || "--"}
+                    </span>
+                  </div>
+                  <p className="text-sm md:text-base text-white/85 font-semibold tracking-wide">
+                    {profile?.role} @ NIE
+                  </p>
                 </div>
-                <p className="text-sm md:text-base text-white/85 font-semibold tracking-wide mt-3">
-                  {profile?.role} @ NIE
-                </p>
               </div>
 
               <div className="flex flex-col items-start md:items-end gap-3 w-full md:w-auto">
-                <div
-                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-sm text-xs font-bold uppercase tracking-widest border ${
-                    isVerifiedUser
-                      ? "bg-green-500/10 text-green-400 border-green-500/30"
-                      : "bg-accent-amber/10 text-accent-amber border-accent-amber/30"
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  {isVerifiedUser ? "Verified" : "Unverified"}
-                </div>
-
                 {!isEditing && !hasGoogleProvider && !isEmailVerified && (
                   <button
                     type="button"
                     onClick={handleSendVerificationEmail}
                     disabled={isSendingVerificationEmail}
-                    className="bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
+                    className="w-full md:w-auto bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
                   >
                     {isSendingVerificationEmail ? "Sending..." : "Verify Email"}
                   </button>
@@ -1032,62 +1033,62 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-3 items-center justify-center md:justify-start text-xs font-bold text-text-secondary uppercase tracking-wider">
-              <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
-                <Mail className="w-4 h-4" />
+            <div className="mt-6 flex flex-wrap gap-2 md:gap-3 items-center justify-center md:justify-start text-[10px] md:text-xs font-bold text-text-secondary uppercase tracking-wider">
+              <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5">
+                <Mail className="w-3.5 h-3.5 md:w-4 md:h-4" />
                 {email}
               </div>
               {hasGoogleProvider && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
-                  <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
+                <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
+                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 md:w-4 md:h-4" aria-hidden="true">
                     <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.2-.9 2.2-2 2.9l3.2 2.5c1.9-1.7 2.9-4.2 2.9-7.1 0-.7-.1-1.5-.2-2.2H12Z" />
                     <path fill="#34A853" d="M12 21.5c2.7 0 4.9-.9 6.6-2.4l-3.2-2.5c-.9.6-2 .9-3.4.9-2.6 0-4.8-1.8-5.6-4.2l-3.3 2.5c1.7 3.4 5.2 5.7 8.9 5.7Z" />
                     <path fill="#4A90E2" d="M6.4 13.3c-.2-.6-.3-1.2-.3-1.8s.1-1.3.3-1.8L3 7.2C2.4 8.5 2 9.9 2 11.5c0 1.6.4 3 1 4.3l3.4-2.5Z" />
                     <path fill="#FBBC05" d="M12 5.4c1.5 0 2.8.5 3.8 1.5l2.8-2.8C16.9 2.6 14.7 1.5 12 1.5c-3.7 0-7.2 2.3-8.9 5.7l3.4 2.5C7.2 7.2 9.4 5.4 12 5.4Z" />
                   </svg>
-                  Connected to Google
+                  Connected
                 </div>
               )}
               {hasEmailProvider && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
-                  <Mail className="w-4 h-4 text-accent-blue" />
-                  Access Link Enabled
+                <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
+                  <Mail className="w-3.5 h-3.5 md:w-4 md:h-4 text-accent-blue" />
+                  Direct Access
                 </div>
               )}
               {profile?.username && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">USER_</span>
                   <span className="text-white">@{profile.username}</span>
                 </div>
               )}
               {profile?.user_type && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">TYPE_</span>
                   <span className="text-white">{profile.user_type}</span>
                 </div>
               )}
               {profile?.usn && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">USN_</span>
                   <span className="text-white">{profile.usn}</span>
                 </div>
               )}
               {profile?.batch && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">BATCH_</span>
                   <span className="text-white">{profile.batch}</span>
                 </div>
               )}
               {profile?.year_of_study && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">YEAR_</span>
                   <span className="text-white">{profile.year_of_study}</span>
                 </div>
               )}
               {!isEditing && (
                 isEditingPhone ? (
-                  <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-accent-blue/40 normal-case tracking-normal text-white min-w-[260px]">
-                    <Phone className="w-4 h-4 text-accent-blue" />
+                  <div className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-accent-blue/40 normal-case tracking-normal text-white min-w-[220px]">
+                    <Phone className="w-3.5 h-3.5 md:w-4 md:h-4 text-accent-blue" />
                     <PhoneInput
                       international
                       defaultCountry="IN"
@@ -1097,7 +1098,7 @@ export default function ProfilePage() {
                       name="phone"
                       autoComplete="tel"
                       inputMode="tel"
-                      className="bg-transparent text-sm flex-1 outline-none text-white placeholder:text-white/30 PhoneInputOverride"
+                      className="bg-transparent text-[10px] md:text-sm flex-1 outline-none text-white placeholder:text-white/30 PhoneInputOverride"
                     />
                     <button
                       type="button"
@@ -1106,7 +1107,7 @@ export default function ProfilePage() {
                       className="p-1 rounded-sm text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
                       aria-label="Save phone number"
                     >
-                      {isSavingPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      {isSavingPhone ? <Loader2 className="w-3.5 h-3.5 md:w-4 md:h-4 animate-spin" /> : <Check className="w-3.5 h-3.5 md:w-4 md:h-4" />}
                     </button>
                     <button
                       type="button"
@@ -1115,19 +1116,19 @@ export default function ProfilePage() {
                       className="p-1 rounded-sm text-text-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
                       aria-label="Cancel phone edit"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-3.5 h-3.5 md:w-4 md:h-4" />
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={startInlinePhoneEdit}
-                    className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5 hover:border-accent-blue/40 hover:text-white transition-colors normal-case tracking-normal"
+                    className="flex items-center gap-2 bg-white/5 py-1.5 px-2.5 md:py-2 md:px-3 rounded-sm border border-white/5 hover:border-accent-blue/40 hover:text-white transition-colors normal-case tracking-normal"
                     aria-label="Edit phone number"
                   >
-                    <Phone className="w-4 h-4" />
+                    <Phone className="w-3.5 h-3.5 md:w-4 md:h-4" />
                     <span>{profile?.phone || "Add phone number"}</span>
-                    <Edit2 className="w-3.5 h-3.5 opacity-70" />
+                    <Edit2 className="w-3 h-3 md:w-3.5 md:h-3.5 opacity-70" />
                   </button>
                 )
               )}
@@ -1452,114 +1453,25 @@ export default function ProfilePage() {
               </h3>
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <p className="text-sm text-white font-semibold">
-                    Logged in from: {activeSession || "Browser on Unknown OS - Bengaluru, IN"}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleLogoutOtherSessions}
-                    disabled={isSigningOutOthers || activeSessions.length <= 1}
-                    className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
-                  >
-                    {isSigningOutOthers ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <LogOut className="w-4 h-4" />
+                  <p className="text-sm text-white font-semibold flex flex-col gap-1">
+                    <span>Logged in from: {activeSession || "Browser on Unknown OS - Bengaluru, IN"}</span>
+                    {authUser?.last_sign_in_at && (
+                      <span className="text-xs text-text-secondary font-normal">
+                        Last sign-in: {formatDateTime(authUser.last_sign_in_at)}
+                      </span>
                     )}
-                    Sign Out Other Sessions
-                  </button>
-                </div>
-
-                {authUser?.last_sign_in_at && (
-                  <p className="text-xs text-text-secondary">
-                    Last sign-in: {formatDateTime(authUser.last_sign_in_at)}
                   </p>
-                )}
-
-                {isSessionsLoading ? (
-                  <div className="space-y-2">
-                    <SkeletonBlock className="h-12 w-full" />
-                    <SkeletonBlock className="h-12 w-full" />
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.2em] text-text-secondary mb-2">Current / Active</p>
-                      <div className="space-y-2">
-                        {activeSessions.length === 0 && (
-                          <p className="text-xs text-text-secondary border border-dashed border-white/10 rounded-sm p-3">
-                            No active sessions tracked yet.
-                          </p>
-                        )}
-                        {activeSessions.map((sessionRow) => {
-                          const isCurrent = sessionRow.session_id === currentSessionId;
-                          const deviceLabel = formatSessionDeviceLabel(sessionRow.user_agent);
-                          const locationLabel = getSessionLocationLabel(sessionRow);
-
-                          return (
-                            <div key={sessionRow.id} className="rounded-sm border border-white/10 bg-black/30 p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-sm text-white font-semibold truncate flex items-center gap-2">
-                                  {deviceLabel.toLowerCase().includes("ios") || deviceLabel.toLowerCase().includes("android") ? (
-                                    <Smartphone className="w-4 h-4 text-accent-blue shrink-0" />
-                                  ) : (
-                                    <Monitor className="w-4 h-4 text-accent-blue shrink-0" />
-                                  )}
-                                  {deviceLabel}
-                                  {isCurrent && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-green-500/40 text-green-400 uppercase tracking-wider">
-                                      Current
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-xs text-text-secondary mt-1">
-                                  {locationLabel} - Last seen {formatDateTime(sessionRow.last_seen_at)}
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoteSessionLogout(sessionRow.session_id)}
-                                disabled={sessionActionId === sessionRow.session_id}
-                                className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-2 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
-                              >
-                                {sessionActionId === sessionRow.session_id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <LogOut className="w-4 h-4" />
-                                )}
-                                {isCurrent ? "Sign Out" : "Log Out Remotely"}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.2em] text-text-secondary mb-2">Previous Sessions</p>
-                      <div className="space-y-2">
-                        {previousSessions.length === 0 ? (
-                          <p className="text-xs text-text-secondary border border-dashed border-white/10 rounded-sm p-3">
-                            No previous sessions yet.
-                          </p>
-                        ) : (
-                          previousSessions.map((sessionRow) => (
-                            <div key={sessionRow.id} className="rounded-sm border border-white/10 bg-black/20 p-3">
-                              <p className="text-sm text-white/90 font-semibold">
-                                {formatSessionDeviceLabel(sessionRow.user_agent)}
-                              </p>
-                              <p className="text-xs text-text-secondary mt-1">
-                                {getSessionLocationLabel(sessionRow)} - Ended {formatDateTime(sessionRow.revoked_at)}
-                              </p>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+                  <Link
+                    href="/profile/sessions"
+                    className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2 hover:px-5 transition-all duration-300 rounded-sm text-[11px] font-bold uppercase tracking-widest group"
+                  >
+                    Manage Login Sessions
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                </div>
               </div>
             </div>
+
 
             {/* View Mode Identity Specifics */}
             <div className="grid md:grid-cols-2 gap-6 mt-6">

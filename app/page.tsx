@@ -4,19 +4,34 @@ import { Shield, Search, Camera, Key, MapPin, CheckCircle, ArrowRight, Zap, Targ
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { createClient } from "@/utils/supabase/client";
 
 function HeroContent() {
   const [isAuth, setIsAuth] = useState(false);
   const [mounted, setMounted] = useState(false);
-  
+
   useEffect(() => {
     setMounted(true);
-    setIsAuth(document.cookie.includes('campus-sync-auth=true'));
+    const supabase = createClient();
+
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAuth(!!session);
+    });
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuth(!!session);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   return (
     <div className="flex-1 flex flex-col justify-start pt-32 md:pt-48 lg:pt-56 translate-y-8 md:translate-y-0 relative z-10 w-full">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
@@ -34,7 +49,7 @@ function HeroContent() {
         <p className="text-text-secondary text-lg md:text-xl max-w-[600px] mb-12 leading-relaxed font-medium">
           The unified, premium portal for NIE students to report parking violations, manage assets, and track lost items in real-time.
         </p>
-        
+
         {mounted && !isAuth ? (
           <div className="flex flex-col sm:flex-row gap-5">
             <Link href="/signup" className="flex items-center justify-center gap-3 bg-white text-campus-black font-bold tracking-wider uppercase text-sm px-10 py-5 clip-diagonal hover:bg-gray-200 transition-colors duration-200 shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_40px_rgba(255,255,255,0.4)]">
@@ -51,7 +66,7 @@ function HeroContent() {
           <div className="flex flex-col sm:flex-row gap-5">
             <Link href="/lost-and-found" className="flex items-center justify-center gap-3 bg-accent-blue text-white font-bold tracking-wider uppercase text-sm px-10 py-5 clip-diagonal hover:bg-blue-500 transition-colors duration-200 shadow-[0_0_30px_rgba(37,99,235,0.4)] hover:shadow-[0_0_40px_rgba(37,99,235,0.6)]">
               <Search className="w-5 h-5" />
-              <span>Find an Item</span>
+              <span>Found an Item</span>
             </Link>
             <Link href="/parking-patrol" className="flex items-center justify-center gap-3 bg-transparent text-white border border-white/20 px-10 py-5 hover:bg-white/10 transition-colors duration-200 font-bold tracking-wider uppercase text-sm shadow-xl">
               <Camera className="w-5 h-5 opacity-80 text-accent-amber" />
@@ -68,7 +83,7 @@ function HeroContent() {
 
 function ParkingCard() {
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, x: -30 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.8, delay: 0.2 }}
@@ -81,7 +96,7 @@ function ParkingCard() {
           <span className="text-green-400 text-[10px] font-black uppercase tracking-widest">Active Report</span>
         </div>
       </div>
-      
+
       <div className="bg-campus-black/80 border border-white/10 rounded-sm flex items-center p-4 gap-5 group-hover:bg-campus-black transition-colors">
         <div className="w-[84px] h-[52px] bg-white/10 rounded-sm flex items-center justify-center overflow-hidden relative border border-white/10">
           <div className="absolute inset-0 bg-white/5 backdrop-blur-md" />
@@ -98,7 +113,7 @@ function ParkingCard() {
 
 function LostFoundCard() {
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, x: 30 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.8, delay: 0.4 }}
@@ -107,7 +122,7 @@ function LostFoundCard() {
       <div className="flex justify-between items-start mb-6">
         <h3 className="text-white font-bold text-xs uppercase tracking-[0.15em]">Recently Found</h3>
       </div>
-      
+
       <div className="flex items-center justify-between mt-2">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-full flex items-center justify-center text-white shadow-inner group-hover:text-accent-blue transition-colors">
@@ -150,7 +165,7 @@ function ExpandedContent() {
       {/* 3 Step Process - Redesigned */}
       <section id="features" className="w-full py-32 bg-campus-black border-t border-white/5">
         <div className="max-w-[1920px] mx-auto px-8 md:px-16 w-full">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 40 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-100px" }}
@@ -168,7 +183,7 @@ function ExpandedContent() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-12 relative">
             {/* Connecting line on desktop */}
             <div className="hidden md:block absolute top-[60px] left-1/6 right-1/6 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent z-0" />
-            
+
             {[
               { icon: <Target className="w-8 h-8 text-white" />, title: "Spot & Scan", desc: "Identify a lost item or an unpermitted vehicle and capture it via the app." },
               { icon: <Shield className="w-8 h-8 text-white" />, title: "Verify & Match", desc: "Our engine cross-references the NIE database and identifies the proper owner." },
@@ -218,7 +233,7 @@ function ExpandedContent() {
 
               <div className="flex flex-col gap-8">
                 {highlightFeatures.map((feat, i) => (
-                  <motion.div 
+                  <motion.div
                     key={i}
                     initial={{ opacity: 0, x: -20 }}
                     whileInView={{ opacity: 1, x: 0 }}
@@ -248,7 +263,7 @@ function ExpandedContent() {
               <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
               <div className="absolute top-10 right-10 w-64 h-64 bg-accent-blue/20 rounded-full blur-[100px]" />
               <div className="absolute bottom-10 left-10 w-64 h-64 bg-accent-amber/10 rounded-full blur-[100px]" />
-              
+
               <div className="relative z-10 flex flex-col items-center justify-center text-center p-8">
                 <Users className="w-24 h-24 text-white/20 mb-6" />
                 <h3 className="text-3xl font-black uppercase tracking-widest text-white/50 mb-2">Join The Network</h3>
@@ -283,21 +298,21 @@ function ExpandedContent() {
 export default function Home() {
   return (
     <main className="relative min-h-screen w-full bg-campus-black selection:bg-accent-blue/30 selection:text-white flex flex-col font-sans overflow-hidden">
-      
+
       {/* Hero Section Container */}
       <div className="relative min-h-screen w-full flex flex-col">
         {/* Background Video */}
         <div className="absolute inset-0 z-0 bg-campus-black">
-          <video 
-            autoPlay 
-            loop 
-            muted 
+          <video
+            autoPlay
+            loop
+            muted
             playsInline
             className="w-full h-full object-cover opacity-[0.45] mix-blend-screen"
           >
-            <source 
-              src="https://res.cloudinary.com/denudp7zb/video/upload/v1/Cinematic_4k_highend_darkthemed_hero_background_vi_52775e50da_i8uoth.mp4" 
-              type="video/mp4" 
+            <source
+              src="https://res.cloudinary.com/denudp7zb/video/upload/v1/Cinematic_4k_highend_darkthemed_hero_background_vi_52775e50da_i8uoth.mp4"
+              type="video/mp4"
             />
           </video>
           {/* Subtle radial gradient overlay */}

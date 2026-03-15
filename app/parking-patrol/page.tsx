@@ -1,6 +1,24 @@
-import { Camera, AlertTriangle, CheckCircle, CarFront, FileWarning } from "lucide-react";
+"use client";
 
+import { Camera, AlertTriangle, CheckCircle, CarFront, FileWarning } from "lucide-react";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+
+const VEHICLE_PLATE_REGEX = /^[A-Z]{2}-\d{2}-[A-Z]{1,3}-\d{4}$/;
+
+function formatVehicleNumber(value: string) {
+  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
+  const match = cleaned.match(/^([A-Z]{0,2})(\d{0,2})([A-Z]{0,3})(\d{0,4})$/);
+
+  if (!match) return "";
+
+  return [match[1], match[2], match[3], match[4]].filter(Boolean).join("-");
+}
 export default function ParkingPatrol() {
+  const [vehicleNo, setVehicleNo] = useState("");
+  const [error, setError] = useState(false);
+  const [isWiggling, setIsWiggling] = useState(false);
+
   const violations = [
     { id: 1, plate: "KA09 AB 1234", location: "Lot B (Faculty Only)", time: "10 mins ago", status: "notified" },
     { id: 2, plate: "DL04 CC 5678", location: "Fire Lane - Main Gate", time: "45 mins ago", status: "towed" },
@@ -47,15 +65,52 @@ export default function ParkingPatrol() {
               <div className="flex flex-col gap-6 w-full max-w-xs md:max-w-sm mx-auto mt-2">
                 
                 {/* 1. Enter Vehicle No Group */}
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    placeholder="KA09 AB 1234"
-                    className="bg-black/40 border border-white/10 rounded-sm px-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-accent-amber/50 transition-colors uppercase w-full font-mono tracking-wider"
-                  />
-                  <button className="bg-accent-amber text-campus-black hover:bg-[#FFC133] font-bold px-6 py-3 rounded-sm transition-colors uppercase tracking-wide text-sm w-full sm:w-auto shrink-0">
-                    Submit
-                  </button>
+                <div className="flex flex-col gap-1 w-full relative">
+                  <motion.div 
+                    className="flex flex-col sm:flex-row gap-2"
+                    animate={isWiggling ? { x: [-5, 5, -5, 5, 0] } : {}}
+                    transition={{ duration: 0.4 }}
+                  >
+                    <input
+                      type="text"
+                      value={vehicleNo}
+                      onChange={(e) => {
+                        setVehicleNo(formatVehicleNumber(e.target.value));
+                        if (error) setError(false);
+                      }}
+                      placeholder="KA-09-AB-1234"
+                      className={`bg-black/40 border rounded-sm px-4 py-3 text-white placeholder:text-white/30 focus:outline-none transition-colors uppercase w-full font-mono tracking-wider ${
+                        error ? "border-red-500 focus:border-red-500" : "border-white/10 focus:border-accent-amber/50"
+                      }`}
+                    />
+                    <button 
+                      onClick={() => {
+                        if (!VEHICLE_PLATE_REGEX.test(vehicleNo)) {
+                          setError(true);
+                          setIsWiggling(true);
+                          setTimeout(() => setIsWiggling(false), 400);
+                        } else {
+                          setError(false);
+                          // Proceed with submission logic
+                        }
+                      }}
+                      className="bg-accent-amber text-campus-black hover:bg-[#FFC133] font-bold px-6 py-3 rounded-sm transition-colors uppercase tracking-wide text-sm w-full sm:w-auto shrink-0"
+                    >
+                      Submit
+                    </button>
+                  </motion.div>
+                  <AnimatePresence>
+                    {error && (
+                      <motion.span
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        className="text-red-400 text-xs font-medium text-left absolute -bottom-5"
+                      >
+                        Use a valid plate format: KA-09-AB-1234.
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 <div className="flex items-center gap-3 opacity-60">

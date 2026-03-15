@@ -11,7 +11,7 @@ export default function ParkingPatrol() {
   return (
     <main className="min-h-screen w-full bg-campus-black text-white selection:bg-accent-amber/30 flex flex-col pt-28">
       <div className="relative z-10 flex flex-col flex-grow px-8 md:px-16 pt-32 pb-12 max-w-[1920px] mx-auto w-full">
-        
+
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12 border-b border-white/10 pb-8 mt-6">
           <div>
@@ -30,12 +30,12 @@ export default function ParkingPatrol() {
 
         {/* Dashboard Panels */}
         <div className="flex flex-col lg:flex-row gap-8 mb-12">
-          
+
           {/* Main Action Area */}
           <div className="flex-1 glass-card p-8 rounded-sm border border-white/10 relative overflow-hidden group">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent-amber to-transparent"></div>
-            
-            <div className="flex flex-col items-center justify-center text-center py-12 px-4 border-2 border-dashed border-white/10 rounded-sm bg-white/5 hover:bg-white/10 hover:border-accent-amber/30 transition-all cursor-pointer">
+
+            <div className="flex flex-col items-center justify-center text-center py-12 px-4 rounded-sm bg-white/5 transition-all text-white/90">
               <div className="w-20 h-20 bg-accent-amber/10 rounded-full flex items-center justify-center mb-6">
                 <CarFront className="w-10 h-10 text-accent-amber" />
               </div>
@@ -43,9 +43,33 @@ export default function ParkingPatrol() {
               <p className="text-text-secondary max-w-sm mx-auto mb-8">
                 Take a clear photo of the license plate and vehicle context to securely report unpermitted parking.
               </p>
-              <button className="bg-white/10 text-white hover:bg-white/20 border border-white/20 font-medium px-8 py-3 rounded-sm transition-colors">
-                Upload Photo manually
-              </button>
+              
+              <div className="flex flex-col gap-6 w-full max-w-xs md:max-w-sm mx-auto mt-2">
+                
+                {/* 1. Enter Vehicle No Group */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    placeholder="KA09 AB 1234"
+                    className="bg-black/40 border border-white/10 rounded-sm px-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-accent-amber/50 transition-colors uppercase w-full font-mono tracking-wider"
+                  />
+                  <button className="bg-accent-amber text-campus-black hover:bg-[#FFC133] font-bold px-6 py-3 rounded-sm transition-colors uppercase tracking-wide text-sm w-full sm:w-auto shrink-0">
+                    Submit
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3 opacity-60">
+                  <div className="h-px bg-white/20 w-full"></div>
+                  <span className="text-xs uppercase tracking-widest text-text-secondary whitespace-nowrap">or</span>
+                  <div className="h-px bg-white/20 w-full"></div>
+                </div>
+
+                {/* 2. Upload Photo */}
+                <button className="bg-white/10 text-white hover:bg-white/20 border border-white/20 font-medium px-8 py-3 rounded-sm transition-colors w-full">
+                  Upload Photo manually
+                </button>
+                
+              </div>
             </div>
           </div>
 
@@ -65,16 +89,16 @@ export default function ParkingPatrol() {
                 <span>Recent Reports</span>
                 <span className="w-2 h-2 rounded-full bg-accent-amber animate-pulse"></span>
               </h3>
-              
+
               <div className="flex flex-col gap-4">
                 {violations.map((v) => (
                   <div key={v.id} className="flex flex-col gap-2 pb-4 border-b border-white/5 last:border-0 last:pb-0">
                     <div className="flex justify-between items-start">
                       <span className="font-mono text-sm tracking-[0.1em] text-white/90 font-bold">{v.plate}</span>
                       <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm flex items-center gap-1
-                        ${v.status === 'notified' ? 'bg-blue-500/20 text-blue-400' : 
-                          v.status === 'towed' ? 'bg-red-500/20 text-red-400' : 
-                          'bg-green-500/20 text-green-400'}`}>
+                        ${v.status === 'notified' ? 'bg-blue-500/20 text-blue-400' :
+                          v.status === 'towed' ? 'bg-red-500/20 text-red-400' :
+                            'bg-green-500/20 text-green-400'}`}>
                         {v.status === 'resolved' ? <CheckCircle className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
                         {v.status}
                       </span>

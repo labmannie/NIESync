@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ShieldCheck, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle } from "lucide-react";
+import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ArrowRight, ShieldCheck, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -155,7 +155,7 @@ export default function ProfilePage() {
   const [memberSince, setMemberSince] = useState("");
   const [email, setEmail] = useState("");
   const [activeSession, setActiveSession] = useState("");
-  
+
   const [isUploading, setIsUploading] = useState(false);
   const [isSavingPhone, setIsSavingPhone] = useState(false);
   const [isEditingPhone, setIsEditingPhone] = useState(false);
@@ -245,7 +245,7 @@ export default function ProfilePage() {
   const fetchProfile = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       if (!user) {
         router.push("/login");
         return;
@@ -657,13 +657,13 @@ export default function ProfilePage() {
         throw new Error("Use a valid plate format: KA-09-AB-1234.");
       }
       if (editForm.role === "Hostelite" && !editForm.roomNo) {
-         throw new Error("Room number is required for hostelites.");
+        throw new Error("Room number is required for hostelites.");
       }
 
       const normalizedAdditionalVehicles = editForm.hasVehicle
         ? editAdditionalVehicles
-            .map((vehicleNo) => formatVehicleNumber(vehicleNo))
-            .filter(Boolean)
+          .map((vehicleNo) => formatVehicleNumber(vehicleNo))
+          .filter(Boolean)
         : [];
 
       const duplicateVehicleValues = new Set<string>();
@@ -753,13 +753,13 @@ export default function ProfilePage() {
     try {
       setError("");
       setSuccess("");
-      
+
       if (!event.target.files || event.target.files.length === 0) {
         return;
       }
 
       const file = event.target.files[0];
-      
+
       if (file.size > 2 * 1024 * 1024) {
         setError("Image size must be strictly under 2MB.");
         return;
@@ -771,7 +771,7 @@ export default function ProfilePage() {
       }
 
       setIsUploading(true);
-      
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Authentication failed");
 
@@ -904,14 +904,14 @@ export default function ProfilePage() {
 
   return (
     <main className="min-h-screen bg-campus-black text-white relative flex justify-center pb-20">
-      
+
       {/* Dynamic Backgrounds */}
       <div className="absolute top-0 left-0 w-full h-[300px] overflow-hidden pointer-events-none before:absolute before:inset-0 before:bg-gradient-to-b before:from-transparent before:to-campus-black z-0">
         <div className="absolute -top-[100px] left-1/2 -translate-x-1/2 w-full max-w-4xl h-[400px] bg-accent-blue/10 blur-[120px] rounded-full" />
       </div>
 
       <div className="w-full max-w-5xl pt-28 px-4 md:px-8 lg:px-10 relative z-10">
-        
+
         {/* Navigation Return */}
         <div className="flex justify-between items-center mb-8">
           <Link href="/lost-and-found" className="inline-flex items-center gap-2 text-text-secondary hover:text-white transition-colors text-xs font-bold uppercase tracking-wider">
@@ -920,7 +920,7 @@ export default function ProfilePage() {
           </Link>
 
           {!isEditing ? (
-            <button 
+            <button
               onClick={startEditing}
               className="inline-flex items-center gap-2 text-accent-blue hover:text-white transition-colors text-xs font-bold uppercase tracking-wider bg-accent-blue/10 hover:bg-accent-blue/20 px-4 py-2 rounded-sm border border-accent-blue/20"
             >
@@ -928,33 +928,33 @@ export default function ProfilePage() {
               Advanced Edit
             </button>
           ) : (
-             <div className="flex gap-3">
-               <button 
-                  onClick={() => setIsEditing(false)}
-                  className="inline-flex items-center gap-2 text-text-secondary hover:text-white transition-colors text-xs font-bold uppercase tracking-wider px-4 py-2"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleSave}
-                  disabled={isSavingProfile}
-                  className="inline-flex items-center gap-2 text-white bg-green-500 hover:bg-green-600 transition-colors text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-sm disabled:opacity-60"
-                >
-                  {isSavingProfile ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  {isSavingProfile ? "Saving..." : "Save"}
-                </button>
-             </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsEditing(false)}
+                className="inline-flex items-center gap-2 text-text-secondary hover:text-white transition-colors text-xs font-bold uppercase tracking-wider px-4 py-2"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSavingProfile}
+                className="inline-flex items-center gap-2 text-white bg-green-500 hover:bg-green-600 transition-colors text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-sm disabled:opacity-60"
+              >
+                {isSavingProfile ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                {isSavingProfile ? "Saving..." : "Save"}
+              </button>
+            </div>
           )}
         </div>
-        
+
         {/* Profile Header Block */}
         <div className="glass-card p-6 md:p-10 rounded-sm border border-white/10 flex flex-col md:flex-row items-start gap-6 md:gap-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent-blue via-cyan-400 to-transparent"></div>
-          
+
           {/* Avatar Upload Hub */}
           <div className="relative group shrink-0 mx-auto md:mx-0">
             <div className={`w-32 h-32 md:w-40 md:h-40 rounded-full border border-white/20 bg-black/50 overflow-hidden shadow-2xl relative flex flex-col items-center justify-center transition-all duration-300 ${!isEditing ? 'pointer-events-none' : 'group-hover:border-accent-blue scale-100 group-hover:scale-105'}`}>
@@ -963,8 +963,8 @@ export default function ProfilePage() {
               ) : (
                 <User className="w-16 h-16 text-white/20" />
               )}
-              
-              <label 
+
+              <label
                 className={`absolute inset-0 bg-black/60 opacity-0 ${isEditing ? 'group-hover:opacity-100' : ''} transition-opacity duration-300 flex flex-col items-center justify-center cursor-pointer backdrop-blur-sm`}
               >
                 {isUploading ? (
@@ -975,12 +975,12 @@ export default function ProfilePage() {
                     <span className="text-[10px] font-bold uppercase tracking-widest text-white mt-2 border-b border-white/50 pb-0.5">Upload Photo</span>
                   </>
                 )}
-                <input 
-                  type="file" 
-                  accept="image/*" 
+                <input
+                  type="file"
+                  accept="image/*"
                   onChange={handleAvatarUpload}
                   disabled={isUploading}
-                  className="hidden" 
+                  className="hidden"
                 />
               </label>
             </div>
@@ -991,40 +991,40 @@ export default function ProfilePage() {
           <div className="flex-1 w-full min-w-0">
             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-5">
               <div className="text-center md:text-left min-w-0">
-                <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight leading-tight break-words">
-                  {profile?.first_name} <span className="text-white/40">{profile?.last_name}</span>
+                <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight leading-tight break-words flex flex-wrap items-center justify-center md:justify-start gap-3">
+                  <span>{profile?.first_name} <span className="text-white/40">{profile?.last_name}</span></span>
+                  <div
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border shrink-0 ${isVerifiedUser
+                        ? "bg-green-500/10 text-green-400 border-green-500/30"
+                        : "bg-accent-amber/10 text-accent-amber border-accent-amber/30"
+                      }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    {isVerifiedUser ? "Verified" : "Unverified"}
+                  </div>
                 </h1>
-                <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-text-secondary font-bold">
-                    Member Since
-                  </span>
-                  <span className="text-xs md:text-sm font-semibold text-white">
-                    {memberSince || "--"}
-                  </span>
+                <div className="mt-4 flex flex-col md:flex-row items-center md:items-start gap-3">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                    <span className="text-[10px] uppercase tracking-[0.2em] text-text-secondary font-bold">
+                      Member Since
+                    </span>
+                    <span className="text-xs md:text-sm font-semibold text-white">
+                      {memberSince || "--"}
+                    </span>
+                  </div>
+                  <p className="text-sm md:text-base text-white/85 font-semibold tracking-wide">
+                    {profile?.role} @ NIE
+                  </p>
                 </div>
-                <p className="text-sm md:text-base text-white/85 font-semibold tracking-wide mt-3">
-                  {profile?.role} @ NIE
-                </p>
               </div>
 
               <div className="flex flex-col items-start md:items-end gap-3 w-full md:w-auto">
-                <div
-                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-sm text-xs font-bold uppercase tracking-widest border ${
-                    isVerifiedUser
-                      ? "bg-green-500/10 text-green-400 border-green-500/30"
-                      : "bg-accent-amber/10 text-accent-amber border-accent-amber/30"
-                  }`}
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  {isVerifiedUser ? "Verified" : "Unverified"}
-                </div>
-
                 {!isEditing && !hasGoogleProvider && !isEmailVerified && (
                   <button
                     type="button"
                     onClick={handleSendVerificationEmail}
                     disabled={isSendingVerificationEmail}
-                    className="bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
+                    className="w-full md:w-auto bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 md:px-4 md:py-2.5 rounded-sm text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
                   >
                     {isSendingVerificationEmail ? "Sending..." : "Verify Email"}
                   </button>
@@ -1032,62 +1032,62 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-3 items-center justify-center md:justify-start text-xs font-bold text-text-secondary uppercase tracking-wider">
-              <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
-                <Mail className="w-4 h-4" />
+            <div className="mt-6 flex flex-wrap gap-2 md:gap-3 items-center justify-center md:justify-start text-xs md:text-xs font-bold text-text-secondary uppercase tracking-wider">
+              <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
+                <Mail className="w-4 h-4 md:w-4 md:h-4" />
                 {email}
               </div>
               {hasGoogleProvider && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
-                  <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
+                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
+                  <svg viewBox="0 0 24 24" className="w-4 h-4 md:w-4 md:h-4" aria-hidden="true">
                     <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.2-.9 2.2-2 2.9l3.2 2.5c1.9-1.7 2.9-4.2 2.9-7.1 0-.7-.1-1.5-.2-2.2H12Z" />
                     <path fill="#34A853" d="M12 21.5c2.7 0 4.9-.9 6.6-2.4l-3.2-2.5c-.9.6-2 .9-3.4.9-2.6 0-4.8-1.8-5.6-4.2l-3.3 2.5c1.7 3.4 5.2 5.7 8.9 5.7Z" />
                     <path fill="#4A90E2" d="M6.4 13.3c-.2-.6-.3-1.2-.3-1.8s.1-1.3.3-1.8L3 7.2C2.4 8.5 2 9.9 2 11.5c0 1.6.4 3 1 4.3l3.4-2.5Z" />
                     <path fill="#FBBC05" d="M12 5.4c1.5 0 2.8.5 3.8 1.5l2.8-2.8C16.9 2.6 14.7 1.5 12 1.5c-3.7 0-7.2 2.3-8.9 5.7l3.4 2.5C7.2 7.2 9.4 5.4 12 5.4Z" />
                   </svg>
-                  Connected to Google
+                  Connected
                 </div>
               )}
               {hasEmailProvider && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
-                  <Mail className="w-4 h-4 text-accent-blue" />
-                  Access Link Enabled
+                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
+                  <Mail className="w-4 h-4 md:w-4 md:h-4 text-accent-blue" />
+                  Direct Access
                 </div>
               )}
               {profile?.username && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">USER_</span>
                   <span className="text-white">@{profile.username}</span>
                 </div>
               )}
               {profile?.user_type && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">TYPE_</span>
                   <span className="text-white">{profile.user_type}</span>
                 </div>
               )}
               {profile?.usn && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">USN_</span>
                   <span className="text-white">{profile.usn}</span>
                 </div>
               )}
               {profile?.batch && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">BATCH_</span>
                   <span className="text-white">{profile.batch}</span>
                 </div>
               )}
               {profile?.year_of_study && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5">
+                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
                   <span className="text-white/40">YEAR_</span>
                   <span className="text-white">{profile.year_of_study}</span>
                 </div>
               )}
               {!isEditing && (
                 isEditingPhone ? (
-                  <div className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-accent-blue/40 normal-case tracking-normal text-white min-w-[260px]">
-                    <Phone className="w-4 h-4 text-accent-blue" />
+                  <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-accent-blue/40 normal-case tracking-normal text-white min-w-[220px]">
+                    <Phone className="w-4 h-4 md:w-4 md:h-4 text-accent-blue" />
                     <PhoneInput
                       international
                       defaultCountry="IN"
@@ -1097,7 +1097,7 @@ export default function ProfilePage() {
                       name="phone"
                       autoComplete="tel"
                       inputMode="tel"
-                      className="bg-transparent text-sm flex-1 outline-none text-white placeholder:text-white/30 PhoneInputOverride"
+                      className="bg-transparent text-xs md:text-sm flex-1 outline-none text-white placeholder:text-white/30 PhoneInputOverride"
                     />
                     <button
                       type="button"
@@ -1106,7 +1106,7 @@ export default function ProfilePage() {
                       className="p-1 rounded-sm text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
                       aria-label="Save phone number"
                     >
-                      {isSavingPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      {isSavingPhone ? <Loader2 className="w-4 h-4 md:w-4 md:h-4 animate-spin" /> : <Check className="w-4 h-4 md:w-4 md:h-4" />}
                     </button>
                     <button
                       type="button"
@@ -1115,19 +1115,19 @@ export default function ProfilePage() {
                       className="p-1 rounded-sm text-text-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
                       aria-label="Cancel phone edit"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-4 h-4 md:w-4 md:h-4" />
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={startInlinePhoneEdit}
-                    className="flex items-center gap-2 bg-white/5 py-2 px-3 rounded-sm border border-white/5 hover:border-accent-blue/40 hover:text-white transition-colors normal-case tracking-normal"
+                    className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5 hover:border-accent-blue/40 hover:text-white transition-colors normal-case tracking-normal"
                     aria-label="Edit phone number"
                   >
-                    <Phone className="w-4 h-4" />
+                    <Phone className="w-4 h-4 md:w-4 md:h-4" />
                     <span>{profile?.phone || "Add phone number"}</span>
-                    <Edit2 className="w-3.5 h-3.5 opacity-70" />
+                    <Edit2 className="w-3.5 h-3.5 md:w-3.5 md:h-3.5 opacity-70" />
                   </button>
                 )
               )}
@@ -1157,291 +1157,291 @@ export default function ProfilePage() {
             </h3>
 
             <div className="grid md:grid-cols-2 gap-8">
-               <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">First Name</label>
-                  <input
-                    type="text"
-                    value={editForm.firstName}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, firstName: e.target.value }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                  />
-               </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">First Name</label>
+                <input
+                  type="text"
+                  value={editForm.firstName}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, firstName: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                />
+              </div>
 
-               <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Last Name</label>
-                  <input
-                    type="text"
-                    value={editForm.lastName}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, lastName: e.target.value }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                  />
-               </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Last Name</label>
+                <input
+                  type="text"
+                  value={editForm.lastName}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, lastName: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                />
+              </div>
 
-               <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Username (Optional)</label>
-                  <input
-                    type="text"
-                    value={editForm.username}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, username: normalizeUsername(e.target.value).slice(0, 20) }))}
-                    placeholder="your_handle"
-                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                  />
-                  <p className="text-[10px] text-text-secondary uppercase tracking-wider">
-                    3-20 chars: lowercase letters, numbers, underscore.
-                  </p>
-               </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Username (Optional)</label>
+                <input
+                  type="text"
+                  value={editForm.username}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, username: normalizeUsername(e.target.value).slice(0, 20) }))}
+                  placeholder="your_handle"
+                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                />
+                <p className="text-[10px] text-text-secondary uppercase tracking-wider">
+                  3-20 chars: lowercase letters, numbers, underscore.
+                </p>
+              </div>
 
-               <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Batch / Branch</label>
-                  <select
-                    value={editForm.batch}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, batch: e.target.value }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
-                  >
-                    <option value="" className="bg-campus-black">Select batch</option>
-                    {BATCH_OPTIONS.map((batch) => (
-                      <option key={batch} value={batch} className="bg-campus-black">
-                        {batch}
-                      </option>
-                    ))}
-                  </select>
-               </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Batch / Branch</label>
+                <select
+                  value={editForm.batch}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, batch: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                >
+                  <option value="" className="bg-campus-black">Select batch</option>
+                  {BATCH_OPTIONS.map((batch) => (
+                    <option key={batch} value={batch} className="bg-campus-black">
+                      {batch}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-               <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Current Year</label>
-                  <select
-                    value={editForm.year}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, year: e.target.value }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
-                  >
-                    <option value="" className="bg-campus-black">Select year</option>
-                    {YEAR_OPTIONS.map((year) => (
-                      <option key={year} value={year} className="bg-campus-black">
-                        {year}
-                      </option>
-                    ))}
-                  </select>
-               </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Current Year</label>
+                <select
+                  value={editForm.year}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, year: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                >
+                  <option value="" className="bg-campus-black">Select year</option>
+                  {YEAR_OPTIONS.map((year) => (
+                    <option key={year} value={year} className="bg-campus-black">
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-               <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
-                  <PhoneInput
-                    international
-                    defaultCountry="IN"
-                    value={editForm.phone}
-                    onChange={(value) => setEditForm(prev => ({...prev, phone: value || ""}))}
-                    onBlur={() => setEditForm((prev) => ({ ...prev, phone: normalizePhoneNumber(prev.phone) }))}
-                    name="phone"
-                    autoComplete="tel"
-                    inputMode="tel"
-                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus-within:border-accent-blue/50 transition-colors text-white PhoneInputOverride"
-                  />
-               </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
+                <PhoneInput
+                  international
+                  defaultCountry="IN"
+                  value={editForm.phone}
+                  onChange={(value) => setEditForm(prev => ({ ...prev, phone: value || "" }))}
+                  onBlur={() => setEditForm((prev) => ({ ...prev, phone: normalizePhoneNumber(prev.phone) }))}
+                  name="phone"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus-within:border-accent-blue/50 transition-colors text-white PhoneInputOverride"
+                />
+              </div>
 
-               <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Campus Status</label>
-                  <select 
-                    value={editForm.role} 
-                    onChange={(e) => setEditForm(prev => ({...prev, role: e.target.value}))}
-                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
-                  >
-                    <option value="Day Scholar" className="bg-campus-black">Day Scholar</option>
-                    <option value="Hostelite" className="bg-campus-black">Hostelite</option>
-                    <option value="Faculty" className="bg-campus-black">Faculty</option>
-                  </select>
-               </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Campus Status</label>
+                <select
+                  value={editForm.role}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, role: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                >
+                  <option value="Day Scholar" className="bg-campus-black">Day Scholar</option>
+                  <option value="Hostelite" className="bg-campus-black">Hostelite</option>
+                  <option value="Faculty" className="bg-campus-black">Faculty</option>
+                </select>
+              </div>
 
-               {editForm.role === "Hostelite" ? (
-                  <>
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Hostel Name</label>
-                      <select 
-                        value={editForm.hostelName} 
-                        onChange={(e) => setEditForm(prev => ({...prev, hostelName: e.target.value}))} 
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer"
-                      >
-                        <option value="NIE North Boys Hostel" className="bg-campus-black">NIE North Boys Hostel</option>
-                        <option value="NIE South Boys Hostel" className="bg-campus-black">NIE South Boys Hostel</option>
-                        <option value="NIE Girls Hostel" className="bg-campus-black">NIE Girls Hostel</option>
-                        <option value="Other Affiliated Hostel" className="bg-campus-black">Other Affiliated Hostel</option>
-                      </select>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Room Number</label>
-                      <input 
-                        type="text" value={editForm.roomNo} onChange={(e) => setEditForm(prev => ({...prev, roomNo: e.target.value}))}
-                        placeholder="Ex: 204-B" 
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                      />
-                    </div>
-                  </>
-               ) : (
+              {editForm.role === "Hostelite" ? (
+                <>
                   <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Primary Campus</label>
-                    <select 
-                      value={editForm.campus} 
-                      onChange={(e) => setEditForm(prev => ({...prev, campus: e.target.value}))} 
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Hostel Name</label>
+                    <select
+                      value={editForm.hostelName}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, hostelName: e.target.value }))}
                       className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer"
                     >
-                      <option value="South Campus" className="bg-campus-black">South Campus</option>
-                      <option value="North Campus" className="bg-campus-black">North Campus</option>
+                      <option value="NIE North Boys Hostel" className="bg-campus-black">NIE North Boys Hostel</option>
+                      <option value="NIE South Boys Hostel" className="bg-campus-black">NIE South Boys Hostel</option>
+                      <option value="NIE Girls Hostel" className="bg-campus-black">NIE Girls Hostel</option>
+                      <option value="Other Affiliated Hostel" className="bg-campus-black">Other Affiliated Hostel</option>
                     </select>
                   </div>
-               )}
-
-               <div className="flex flex-col gap-4 md:col-span-2 border-t border-white/10 pt-6 mt-2">
                   <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Do you drive a vehicle to campus?</label>
-                    <div className="flex gap-4">
-                      {["No", "Yes"].map((opt) => (
-                         <div 
-                          key={opt}
-                          onClick={() => setEditForm(prev => ({ ...prev, hasVehicle: opt === "Yes" }))}
-                          className={`
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Room Number</label>
+                    <input
+                      type="text" value={editForm.roomNo} onChange={(e) => setEditForm(prev => ({ ...prev, roomNo: e.target.value }))}
+                      placeholder="Ex: 204-B"
+                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Primary Campus</label>
+                  <select
+                    value={editForm.campus}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, campus: e.target.value }))}
+                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer"
+                  >
+                    <option value="South Campus" className="bg-campus-black">South Campus</option>
+                    <option value="North Campus" className="bg-campus-black">North Campus</option>
+                  </select>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-4 md:col-span-2 border-t border-white/10 pt-6 mt-2">
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Do you drive a vehicle to campus?</label>
+                  <div className="flex gap-4">
+                    {["No", "Yes"].map((opt) => (
+                      <div
+                        key={opt}
+                        onClick={() => setEditForm(prev => ({ ...prev, hasVehicle: opt === "Yes" }))}
+                        className={`
                             cursor-pointer flex-1 border py-3 rounded-sm text-center text-sm font-bold uppercase tracking-widest transition-all duration-200
                             ${(editForm.hasVehicle && opt === "Yes") || (!editForm.hasVehicle && opt === "No")
-                              ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]" 
-                              : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                            }
+                            ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                            : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
+                          }
                           `}
-                        >
-                          {opt}
-                        </div>
-                      ))}
-                    </div>
+                      >
+                        {opt}
+                      </div>
+                    ))}
                   </div>
+                </div>
 
-                  {editForm.hasVehicle && (
-                    <div className="flex flex-col gap-4 mt-4">
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">License Plate Number (Primary)</label>
+                {editForm.hasVehicle && (
+                  <div className="flex flex-col gap-4 mt-4">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">License Plate Number (Primary)</label>
+                      <input
+                        type="text"
+                        value={editForm.vehicleNo}
+                        onChange={(e) =>
+                          setEditForm((prev) => ({
+                            ...prev,
+                            vehicleNo: formatVehicleNumber(e.target.value),
+                          }))
+                        }
+                        placeholder="KA-09-XX-XXXX"
+                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between mt-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                        Additional Vehicle Numbers
+                      </label>
+                      <button
+                        type="button"
+                        onClick={addAnotherVehicleField}
+                        className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-accent-blue hover:text-white transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add Another
+                      </button>
+                    </div>
+
+                    {editAdditionalVehicles.length === 0 && (
+                      <p className="text-xs text-text-secondary border border-dashed border-white/10 rounded-sm p-3">
+                        No additional vehicles added.
+                      </p>
+                    )}
+
+                    {editAdditionalVehicles.map((vehicleNo, index) => (
+                      <div key={`vehicle-${index}`} className="flex items-center gap-2">
                         <input
                           type="text"
-                          value={editForm.vehicleNo}
+                          value={vehicleNo}
                           onChange={(e) =>
-                            setEditForm((prev) => ({
-                              ...prev,
-                              vehicleNo: formatVehicleNumber(e.target.value),
-                            }))
+                            updateAdditionalVehicleField(index, e.target.value)
                           }
                           placeholder="KA-09-XX-XXXX"
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
+                          className="flex-1 bg-black/40 border border-white/10 rounded-sm p-3 text-base font-mono tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
                         />
-                      </div>
-
-                      <div className="flex items-center justify-between mt-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                          Additional Vehicle Numbers
-                        </label>
                         <button
                           type="button"
-                          onClick={addAnotherVehicleField}
-                          className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-accent-blue hover:text-white transition-colors"
+                          onClick={() => removeAdditionalVehicleField(index)}
+                          className="p-2 rounded-sm border border-white/10 text-text-secondary hover:text-white hover:border-white/30 transition-colors"
+                          aria-label={`Remove vehicle ${index + 1}`}
                         >
-                          <Plus className="w-4 h-4" />
-                          Add Another
+                          <X className="w-4 h-4" />
                         </button>
                       </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-                      {editAdditionalVehicles.length === 0 && (
-                        <p className="text-xs text-text-secondary border border-dashed border-white/10 rounded-sm p-3">
-                          No additional vehicles added.
-                        </p>
-                      )}
+              <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
+                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                  Email Verification Status
+                </label>
+                {isVerifiedUser ? (
+                  <p className="text-sm text-green-400 bg-green-500/10 border border-green-500/30 rounded-sm p-3">
+                    {verificationMethodText}
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm text-accent-amber bg-accent-amber/10 border border-accent-amber/30 rounded-sm p-3">
+                      Unverified. Please verify your email to complete trusted account status.
+                    </p>
+                    {hasEmailProvider && (
+                      <button
+                        type="button"
+                        onClick={handleSendVerificationEmail}
+                        disabled={isSendingVerificationEmail}
+                        className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
+                      >
+                        {isSendingVerificationEmail ? "Sending..." : "Send Verification Link"}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
 
-                      {editAdditionalVehicles.map((vehicleNo, index) => (
-                        <div key={`vehicle-${index}`} className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={vehicleNo}
-                            onChange={(e) =>
-                              updateAdditionalVehicleField(index, e.target.value)
-                            }
-                            placeholder="KA-09-XX-XXXX"
-                            className="flex-1 bg-black/40 border border-white/10 rounded-sm p-3 text-base font-mono tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeAdditionalVehicleField(index)}
-                            className="p-2 rounded-sm border border-white/10 text-text-secondary hover:text-white hover:border-white/30 transition-colors"
-                            aria-label={`Remove vehicle ${index + 1}`}
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
+              {isGoogleOnlyAccount && (
+                <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
+                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                    Link Password Login (Google-only users)
+                  </label>
+                  <div className="flex flex-col md:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <input
+                        type={showLinkPassword ? "text" : "password"}
+                        value={linkPassword}
+                        onChange={(e) => setLinkPassword(e.target.value)}
+                        placeholder="Create password (min 6 chars)"
+                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 pr-12 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLinkPassword((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-white transition-colors"
+                        aria-label={showLinkPassword ? "Hide password" : "Show password"}
+                      >
+                        {showLinkPassword ? (
+                          <EyeOff className="w-5 h-5" />
+                        ) : (
+                          <Eye className="w-5 h-5" />
+                        )}
+                      </button>
                     </div>
-                  )}
-               </div>
-
-               <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
-                 <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                   Email Verification Status
-                 </label>
-                 {isVerifiedUser ? (
-                   <p className="text-sm text-green-400 bg-green-500/10 border border-green-500/30 rounded-sm p-3">
-                     {verificationMethodText}
-                   </p>
-                 ) : (
-                   <>
-                     <p className="text-sm text-accent-amber bg-accent-amber/10 border border-accent-amber/30 rounded-sm p-3">
-                       Unverified. Please verify your email to complete trusted account status.
-                     </p>
-                     {hasEmailProvider && (
-                       <button
-                         type="button"
-                         onClick={handleSendVerificationEmail}
-                         disabled={isSendingVerificationEmail}
-                         className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
-                       >
-                         {isSendingVerificationEmail ? "Sending..." : "Send Verification Link"}
-                       </button>
-                     )}
-                   </>
-                 )}
-               </div>
-
-               {isGoogleOnlyAccount && (
-                 <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
-                   <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                     Link Password Login (Google-only users)
-                   </label>
-                   <div className="flex flex-col md:flex-row gap-3">
-                     <div className="relative flex-1">
-                       <input
-                         type={showLinkPassword ? "text" : "password"}
-                         value={linkPassword}
-                         onChange={(e) => setLinkPassword(e.target.value)}
-                         placeholder="Create password (min 6 chars)"
-                         className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 pr-12 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                       />
-                       <button
-                         type="button"
-                         onClick={() => setShowLinkPassword((prev) => !prev)}
-                         className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-white transition-colors"
-                         aria-label={showLinkPassword ? "Hide password" : "Show password"}
-                       >
-                         {showLinkPassword ? (
-                           <EyeOff className="w-5 h-5" />
-                         ) : (
-                           <Eye className="w-5 h-5" />
-                         )}
-                       </button>
-                     </div>
-                     <button
-                       type="button"
-                       onClick={handleLinkPassword}
-                       disabled={isLinkingPassword}
-                       className="bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
-                     >
-                       {isLinkingPassword ? "Linking..." : "Link Password"}
-                     </button>
-                   </div>
-                   <p className="text-xs text-text-secondary">
-                     This links password login to the same account you already use with Google.
-                   </p>
-                 </div>
-               )}
+                    <button
+                      type="button"
+                      onClick={handleLinkPassword}
+                      disabled={isLinkingPassword}
+                      className="bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
+                    >
+                      {isLinkingPassword ? "Linking..." : "Link Password"}
+                    </button>
+                  </div>
+                  <p className="text-xs text-text-secondary">
+                    This links password login to the same account you already use with Google.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -1452,114 +1452,25 @@ export default function ProfilePage() {
               </h3>
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <p className="text-sm text-white font-semibold">
-                    Logged in from: {activeSession || "Browser on Unknown OS - Bengaluru, IN"}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleLogoutOtherSessions}
-                    disabled={isSigningOutOthers || activeSessions.length <= 1}
-                    className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
-                  >
-                    {isSigningOutOthers ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <LogOut className="w-4 h-4" />
+                  <p className="text-sm text-white font-semibold flex flex-col gap-1">
+                    <span>Logged in from: {activeSession || "Browser on Unknown OS - Bengaluru, IN"}</span>
+                    {authUser?.last_sign_in_at && (
+                      <span className="text-xs text-text-secondary font-normal">
+                        Last sign-in: {formatDateTime(authUser.last_sign_in_at)}
+                      </span>
                     )}
-                    Sign Out Other Sessions
-                  </button>
-                </div>
-
-                {authUser?.last_sign_in_at && (
-                  <p className="text-xs text-text-secondary">
-                    Last sign-in: {formatDateTime(authUser.last_sign_in_at)}
                   </p>
-                )}
-
-                {isSessionsLoading ? (
-                  <div className="space-y-2">
-                    <SkeletonBlock className="h-12 w-full" />
-                    <SkeletonBlock className="h-12 w-full" />
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.2em] text-text-secondary mb-2">Current / Active</p>
-                      <div className="space-y-2">
-                        {activeSessions.length === 0 && (
-                          <p className="text-xs text-text-secondary border border-dashed border-white/10 rounded-sm p-3">
-                            No active sessions tracked yet.
-                          </p>
-                        )}
-                        {activeSessions.map((sessionRow) => {
-                          const isCurrent = sessionRow.session_id === currentSessionId;
-                          const deviceLabel = formatSessionDeviceLabel(sessionRow.user_agent);
-                          const locationLabel = getSessionLocationLabel(sessionRow);
-
-                          return (
-                            <div key={sessionRow.id} className="rounded-sm border border-white/10 bg-black/30 p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-sm text-white font-semibold truncate flex items-center gap-2">
-                                  {deviceLabel.toLowerCase().includes("ios") || deviceLabel.toLowerCase().includes("android") ? (
-                                    <Smartphone className="w-4 h-4 text-accent-blue shrink-0" />
-                                  ) : (
-                                    <Monitor className="w-4 h-4 text-accent-blue shrink-0" />
-                                  )}
-                                  {deviceLabel}
-                                  {isCurrent && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full border border-green-500/40 text-green-400 uppercase tracking-wider">
-                                      Current
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-xs text-text-secondary mt-1">
-                                  {locationLabel} - Last seen {formatDateTime(sessionRow.last_seen_at)}
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoteSessionLogout(sessionRow.session_id)}
-                                disabled={sessionActionId === sessionRow.session_id}
-                                className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-2 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
-                              >
-                                {sessionActionId === sessionRow.session_id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <LogOut className="w-4 h-4" />
-                                )}
-                                {isCurrent ? "Sign Out" : "Log Out Remotely"}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.2em] text-text-secondary mb-2">Previous Sessions</p>
-                      <div className="space-y-2">
-                        {previousSessions.length === 0 ? (
-                          <p className="text-xs text-text-secondary border border-dashed border-white/10 rounded-sm p-3">
-                            No previous sessions yet.
-                          </p>
-                        ) : (
-                          previousSessions.map((sessionRow) => (
-                            <div key={sessionRow.id} className="rounded-sm border border-white/10 bg-black/20 p-3">
-                              <p className="text-sm text-white/90 font-semibold">
-                                {formatSessionDeviceLabel(sessionRow.user_agent)}
-                              </p>
-                              <p className="text-xs text-text-secondary mt-1">
-                                {getSessionLocationLabel(sessionRow)} - Ended {formatDateTime(sessionRow.revoked_at)}
-                              </p>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
+                  <Link
+                    href="/profile/sessions"
+                    className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2 hover:px-5 transition-all duration-300 rounded-sm text-[11px] font-bold uppercase tracking-widest group"
+                  >
+                    Manage Login Sessions
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                </div>
               </div>
             </div>
+
 
             {/* View Mode Identity Specifics */}
             <div className="grid md:grid-cols-2 gap-6 mt-6">

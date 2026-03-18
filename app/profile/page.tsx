@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ArrowRight, ShieldCheck, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle } from "lucide-react";
+import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ArrowRight, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -151,7 +151,7 @@ export default function ProfilePage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [authUser, setAuthUser] = useState<any>(null);
-  const [additionalVehicles, setAdditionalVehicles] = useState<Array<{ id: string; vehicle_no: string }>>([]);
+  const [additionalVehicles, setAdditionalVehicles] = useState<Array<{ id: string; vehicle_no: string; vehicle_type?: string; vehicle_brand_model?: string; vehicle_color?: string }>>([]);
   const [memberSince, setMemberSince] = useState("");
   const [email, setEmail] = useState("");
   const [activeSession, setActiveSession] = useState("");
@@ -186,13 +186,17 @@ export default function ProfilePage() {
     hostelName: "",
     roomNo: "",
     hasVehicle: false,
-    vehicleNo: ""
+    vehicleNo: "",
+    vehicleType: "" as "" | "2-Wheeler" | "4-Wheeler",
+    vehicleBrandModel: "",
+    vehicleColor: ""
   });
-  const [editAdditionalVehicles, setEditAdditionalVehicles] = useState<string[]>([]);
+  const [editAdditionalVehicles, setEditAdditionalVehicles] = useState<Array<{ vehicleNo: string; vehicleType: string; vehicleBrandModel: string; vehicleColor: string }>>([]);
   const [linkPassword, setLinkPassword] = useState("");
   const [showLinkPassword, setShowLinkPassword] = useState(false);
   const [isLinkingPassword, setIsLinkingPassword] = useState(false);
   const [isSendingVerificationEmail, setIsSendingVerificationEmail] = useState(false);
+  const [isSendingResetEmail, setIsSendingResetEmail] = useState(false);
 
   useEffect(() => {
     fetchProfile();
@@ -272,7 +276,7 @@ export default function ProfilePage() {
 
       const { data: extraVehicles, error: extraVehiclesError } = await supabase
         .from("profile_vehicles")
-        .select("id, vehicle_no")
+        .select("id, vehicle_no, vehicle_type, vehicle_brand_model, vehicle_color")
         .eq("profile_id", user.id)
         .order("created_at", { ascending: true });
 
@@ -302,9 +306,17 @@ export default function ProfilePage() {
       hostelName: profile?.hostel_name || "NIE North Boys Hostel",
       roomNo: profile?.room_no || "",
       hasVehicle: profile?.has_vehicle || false,
-      vehicleNo: profile?.vehicle_no || ""
+      vehicleNo: profile?.vehicle_no || "",
+      vehicleType: profile?.vehicle_type || "",
+      vehicleBrandModel: profile?.vehicle_brand_model || "",
+      vehicleColor: profile?.vehicle_color || ""
     });
-    setEditAdditionalVehicles(additionalVehicles.map((vehicle) => vehicle.vehicle_no));
+    setEditAdditionalVehicles(additionalVehicles.map((vehicle) => ({
+      vehicleNo: vehicle.vehicle_no,
+      vehicleType: vehicle.vehicle_type || "",
+      vehicleBrandModel: vehicle.vehicle_brand_model || "",
+      vehicleColor: vehicle.vehicle_color || ""
+    })));
     setIsEditing(true);
     setError("");
     setSuccess("");
@@ -576,13 +588,15 @@ export default function ProfilePage() {
   };
 
   const addAnotherVehicleField = () => {
-    setEditAdditionalVehicles((prev) => [...prev, ""]);
+    setEditAdditionalVehicles((prev) => [...prev, { vehicleNo: "", vehicleType: "", vehicleBrandModel: "", vehicleColor: "" }]);
   };
 
-  const updateAdditionalVehicleField = (index: number, value: string) => {
+  const updateAdditionalVehicleField = (index: number, field: string, value: string) => {
     setEditAdditionalVehicles((prev) =>
       prev.map((item, itemIndex) =>
-        itemIndex === index ? formatVehicleNumber(value) : item
+        itemIndex === index
+          ? { ...item, [field]: field === "vehicleNo" ? formatVehicleNumber(value) : value }
+          : item
       )
     );
   };
@@ -646,7 +660,10 @@ export default function ProfilePage() {
       }
 
       const normalizedPhone = normalizePhoneNumber(editForm.phone || "");
-      if (normalizedPhone && !isValidPhoneNumber(normalizedPhone)) {
+      if (!normalizedPhone) {
+        throw new Error("Phone number is required. Please enter your phone number.");
+      }
+      if (!isValidPhoneNumber(normalizedPhone)) {
         throw new Error("Please enter a valid phone number.");
       }
 
@@ -662,22 +679,22 @@ export default function ProfilePage() {
 
       const normalizedAdditionalVehicles = editForm.hasVehicle
         ? editAdditionalVehicles
-          .map((vehicleNo) => formatVehicleNumber(vehicleNo))
-          .filter(Boolean)
+          .map((v) => ({ ...v, vehicleNo: formatVehicleNumber(v.vehicleNo) }))
+          .filter((v) => v.vehicleNo)
         : [];
 
       const duplicateVehicleValues = new Set<string>();
-      for (const vehicleNo of normalizedAdditionalVehicles) {
-        if (!VEHICLE_PLATE_REGEX.test(vehicleNo)) {
+      for (const v of normalizedAdditionalVehicles) {
+        if (!VEHICLE_PLATE_REGEX.test(v.vehicleNo)) {
           throw new Error("Each additional vehicle must follow format KA-09-AB-1234.");
         }
-        if (vehicleNo === editForm.vehicleNo) {
+        if (v.vehicleNo === editForm.vehicleNo) {
           throw new Error("Primary and additional vehicles cannot be the same.");
         }
-        if (duplicateVehicleValues.has(vehicleNo)) {
+        if (duplicateVehicleValues.has(v.vehicleNo)) {
           throw new Error("Duplicate additional vehicle numbers are not allowed.");
         }
-        duplicateVehicleValues.add(vehicleNo);
+        duplicateVehicleValues.add(v.vehicleNo);
       }
 
       const updates = {
@@ -692,7 +709,10 @@ export default function ProfilePage() {
         hostel_name: editForm.role === "Hostelite" ? editForm.hostelName : null,
         room_no: editForm.role === "Hostelite" ? editForm.roomNo : null,
         has_vehicle: editForm.hasVehicle,
-        vehicle_no: editForm.hasVehicle ? editForm.vehicleNo : null
+        vehicle_no: editForm.hasVehicle ? editForm.vehicleNo : null,
+        vehicle_type: editForm.hasVehicle ? (editForm.vehicleType || null) : null,
+        vehicle_brand_model: editForm.hasVehicle ? (editForm.vehicleBrandModel.trim() || null) : null,
+        vehicle_color: editForm.hasVehicle ? (editForm.vehicleColor.trim() || null) : null
       };
 
       const { error: updateError } = await supabase
@@ -715,9 +735,12 @@ export default function ProfilePage() {
         const { error: insertExtraVehiclesError } = await supabase
           .from("profile_vehicles")
           .insert(
-            normalizedAdditionalVehicles.map((vehicleNo) => ({
+            normalizedAdditionalVehicles.map((v) => ({
               profile_id: user.id,
-              vehicle_no: vehicleNo,
+              vehicle_no: v.vehicleNo,
+              vehicle_type: v.vehicleType || null,
+              vehicle_brand_model: v.vehicleBrandModel.trim() || null,
+              vehicle_color: v.vehicleColor.trim() || null,
             }))
           );
 
@@ -726,7 +749,7 @@ export default function ProfilePage() {
 
       const { data: refreshedAdditionalVehicles } = await supabase
         .from("profile_vehicles")
-        .select("id, vehicle_no")
+        .select("id, vehicle_no, vehicle_type, vehicle_brand_model, vehicle_color")
         .eq("profile_id", user.id)
         .order("created_at", { ascending: true });
 
@@ -957,35 +980,31 @@ export default function ProfilePage() {
 
           {/* Avatar Upload Hub */}
           <div className="relative group shrink-0 mx-auto md:mx-0">
-            <div className={`w-32 h-32 md:w-40 md:h-40 rounded-full border border-white/20 bg-black/50 overflow-hidden shadow-2xl relative flex flex-col items-center justify-center transition-all duration-300 ${!isEditing ? 'pointer-events-none' : 'group-hover:border-accent-blue scale-100 group-hover:scale-105'}`}>
+            <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border border-white/20 bg-black/50 overflow-hidden shadow-2xl relative flex flex-col items-center justify-center transition-all duration-300 group-hover:border-accent-blue scale-100 group-hover:scale-105">
               {profile?.avatar_url ? (
                 <Image src={profile.avatar_url} alt="Profile Photo" fill className="object-cover" />
               ) : (
                 <User className="w-16 h-16 text-white/20" />
               )}
-
-              <label
-                className={`absolute inset-0 bg-black/60 opacity-0 ${isEditing ? 'group-hover:opacity-100' : ''} transition-opacity duration-300 flex flex-col items-center justify-center cursor-pointer backdrop-blur-sm`}
-              >
-                {isUploading ? (
-                  <Loader2 className="w-6 h-6 animate-spin text-white" />
-                ) : (
-                  <>
-                    <Camera className="w-8 h-8 text-white drop-shadow-md" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-white mt-2 border-b border-white/50 pb-0.5">Upload Photo</span>
-                  </>
-                )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleAvatarUpload}
-                  disabled={isUploading}
-                  className="hidden"
-                />
-              </label>
             </div>
             {/* Status indicator */}
             {!isEditing && <div className="absolute bottom-2 right-2 w-4 h-4 rounded-full bg-green-500 border border-campus-black shadow-[0_0_10px_rgba(34,197,94,0.5)]"></div>}
+            {/* Edit Photo Button */}
+            <label
+              htmlFor="avatar-upload-input"
+              className="absolute bottom-2 left-2 w-8 h-8 rounded-full bg-accent-blue/80 hover:bg-accent-blue border border-white/20 flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-110 shadow-lg z-10"
+              title="Edit Photo"
+            >
+              <Edit2 className="w-4 h-4 text-white" />
+            </label>
+            <input
+              type="file"
+              id="avatar-upload-input"
+              accept="image/*"
+              onChange={handleAvatarUpload}
+              disabled={isUploading}
+              className="hidden"
+            />
           </div>
 
           <div className="flex-1 w-full min-w-0">
@@ -993,14 +1012,28 @@ export default function ProfilePage() {
               <div className="text-center md:text-left min-w-0">
                 <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight leading-tight break-words flex flex-wrap items-center justify-center md:justify-start gap-3">
                   <span>{profile?.first_name} <span className="text-white/40">{profile?.last_name}</span></span>
-                  <div
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border shrink-0 ${isVerifiedUser
-                        ? "bg-green-500/10 text-green-400 border-green-500/30"
-                        : "bg-accent-amber/10 text-accent-amber border-accent-amber/30"
-                      }`}
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    {isVerifiedUser ? "Verified" : "Unverified"}
+                  {/* WhatsApp-style verification badge */}
+                  <div className="relative group shrink-0">
+                    {isVerifiedUser ? (
+                      <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-green-500 flex items-center justify-center shadow-[0_0_12px_rgba(34,197,94,0.5)] transition-transform duration-200 group-hover:scale-110">
+                        <svg viewBox="0 0 24 24" className="w-4 h-4 md:w-5 md:h-5 text-white" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      </div>
+                    ) : (
+                      <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-amber-500 flex items-center justify-center shadow-[0_0_12px_rgba(245,158,11,0.5)] transition-transform duration-200 group-hover:scale-110">
+                        <svg viewBox="0 0 24 24" className="w-4 h-4 md:w-5 md:h-5 text-white" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="12" y1="8" x2="12" y2="13" />
+                          <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
+                        </svg>
+                      </div>
+                    )}
+                    {/* Tooltip */}
+                    <div className="absolute -bottom-9 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-20">
+                      <div className={`whitespace-nowrap px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${isVerifiedUser ? 'bg-green-500 text-white' : 'bg-amber-500 text-white'}`}>
+                        {isVerifiedUser ? "Verified" : "Unverified"}
+                      </div>
+                    </div>
                   </div>
                 </h1>
                 <div className="mt-4 flex flex-col md:flex-row items-center md:items-start gap-3">
@@ -1329,6 +1362,58 @@ export default function ProfilePage() {
                       />
                     </div>
 
+                    {/* Vehicle Type Toggle */}
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Vehicle Type</label>
+                      <div className="flex gap-4">
+                        {(["2-Wheeler", "4-Wheeler"] as const).map((type) => (
+                          <div
+                            key={type}
+                            onClick={() => setEditForm(prev => ({ ...prev, vehicleType: type }))}
+                            className={`
+                              cursor-pointer flex-1 border py-3 rounded-sm text-center text-sm font-bold uppercase tracking-widest transition-all duration-200
+                              ${editForm.vehicleType === type
+                                ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                                : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
+                              }
+                            `}
+                          >
+                            {type}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Vehicle Brand/Model */}
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Vehicle Brand / Model</label>
+                      <input
+                        type="text"
+                        value={editForm.vehicleBrandModel}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, vehicleBrandModel: e.target.value }))}
+                        placeholder="e.g., Royal Enfield Himalayan"
+                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                      />
+                      <p className="text-[10px] text-text-secondary uppercase tracking-wider">
+                        Helps identify your vehicle in parking reports.
+                      </p>
+                    </div>
+
+                    {/* Vehicle Color */}
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Vehicle Color</label>
+                      <input
+                        type="text"
+                        value={editForm.vehicleColor}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, vehicleColor: e.target.value }))}
+                        placeholder="e.g., White, Matte Black, Red"
+                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                      />
+                      <p className="text-[10px] text-text-secondary uppercase tracking-wider">
+                        Helps pinpoint the right vehicle quickly.
+                      </p>
+                    </div>
+
                     <div className="flex items-center justify-between mt-2">
                       <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
                         Additional Vehicle Numbers
@@ -1349,25 +1434,55 @@ export default function ProfilePage() {
                       </p>
                     )}
 
-                    {editAdditionalVehicles.map((vehicleNo, index) => (
-                      <div key={`vehicle-${index}`} className="flex items-center gap-2">
+                    {editAdditionalVehicles.map((vehicle, index) => (
+                      <div key={`vehicle-${index}`} className="border border-white/10 rounded-sm p-4 flex flex-col gap-3 bg-white/[0.02]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Vehicle {index + 2}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeAdditionalVehicleField(index)}
+                            className="p-1 rounded-sm border border-white/10 text-text-secondary hover:text-white hover:border-white/30 transition-colors"
+                            aria-label={`Remove vehicle ${index + 2}`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                         <input
                           type="text"
-                          value={vehicleNo}
-                          onChange={(e) =>
-                            updateAdditionalVehicleField(index, e.target.value)
-                          }
+                          value={vehicle.vehicleNo}
+                          onChange={(e) => updateAdditionalVehicleField(index, "vehicleNo", e.target.value)}
                           placeholder="KA-09-XX-XXXX"
-                          className="flex-1 bg-black/40 border border-white/10 rounded-sm p-3 text-base font-mono tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
+                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3 text-base font-mono tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
                         />
-                        <button
-                          type="button"
-                          onClick={() => removeAdditionalVehicleField(index)}
-                          className="p-2 rounded-sm border border-white/10 text-text-secondary hover:text-white hover:border-white/30 transition-colors"
-                          aria-label={`Remove vehicle ${index + 1}`}
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
+                        <div className="flex gap-3">
+                          {(["2-Wheeler", "4-Wheeler"] as const).map((type) => (
+                            <div
+                              key={type}
+                              onClick={() => updateAdditionalVehicleField(index, "vehicleType", type)}
+                              className={`cursor-pointer flex-1 border py-2 rounded-sm text-center text-[11px] font-bold uppercase tracking-widest transition-all duration-200 ${
+                                vehicle.vehicleType === type
+                                  ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_10px_rgba(37,99,235,0.2)]"
+                                  : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
+                              }`}
+                            >
+                              {type}
+                            </div>
+                          ))}
+                        </div>
+                        <input
+                          type="text"
+                          value={vehicle.vehicleBrandModel}
+                          onChange={(e) => updateAdditionalVehicleField(index, "vehicleBrandModel", e.target.value)}
+                          placeholder="Brand / Model (e.g., TVS Jupiter)"
+                          className="w-full bg-black/40 border border-white/10 rounded-sm p-2.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                        />
+                        <input
+                          type="text"
+                          value={vehicle.vehicleColor}
+                          onChange={(e) => updateAdditionalVehicleField(index, "vehicleColor", e.target.value)}
+                          placeholder="Color (e.g., Black)"
+                          className="w-full bg-black/40 border border-white/10 rounded-sm p-2.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
+                        />
                       </div>
                     ))}
                   </div>
@@ -1442,6 +1557,92 @@ export default function ProfilePage() {
                   </p>
                 </div>
               )}
+
+              {/* Link Google Account — visible for email-only users */}
+              {hasEmailProvider && !hasGoogleProvider && (
+                <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
+                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                    Link Google Account
+                  </label>
+                  <p className="text-sm text-text-secondary">
+                    Connect your NIE Google Workspace account to enable one-click sign-in and automatic verification.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setError("");
+                      setSuccess("");
+                      try {
+                        const supabase = createClient();
+                        const { data, error: linkError } = await supabase.auth.linkIdentity({
+                          provider: "google",
+                          options: {
+                            redirectTo: `${window.location.origin}/auth/callback`,
+                            queryParams: {
+                              prompt: "select_account consent",
+                              hd: "nie.ac.in",
+                            },
+                          },
+                        });
+                        if (linkError) throw linkError;
+                        if (data?.url) {
+                          window.location.href = data.url;
+                        }
+                      } catch (err: any) {
+                        if (err?.message?.includes("404") || err?.status === 404) {
+                          setError("Identity linking is not enabled. Please enable 'Allow Manual Linking' in Supabase Dashboard → Authentication → Providers.");
+                        } else {
+                          setError(err.message || "Unable to link Google account.");
+                        }
+                      }
+                    }}
+                    className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors inline-flex items-center gap-3"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden="true">
+                      <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.2-.9 2.2-2 2.9l3.2 2.5c1.9-1.7 2.9-4.2 2.9-7.1 0-.7-.1-1.5-.2-2.2H12Z" />
+                      <path fill="#34A853" d="M12 21.5c2.7 0 4.9-.9 6.6-2.4l-3.2-2.5c-.9.6-2 .9-3.4.9-2.6 0-4.8-1.8-5.6-4.2l-3.3 2.5c1.7 3.4 5.2 5.7 8.9 5.7Z" />
+                      <path fill="#4A90E2" d="M6.4 13.3c-.2-.6-.3-1.2-.3-1.8s.1-1.3.3-1.8L3 7.2C2.4 8.5 2 9.9 2 11.5c0 1.6.4 3 1 4.3l3.4-2.5Z" />
+                      <path fill="#FBBC05" d="M12 5.4c1.5 0 2.8.5 3.8 1.5l2.8-2.8C16.9 2.6 14.7 1.5 12 1.5c-3.7 0-7.2 2.3-8.9 5.7l3.4 2.5C7.2 7.2 9.4 5.4 12 5.4Z" />
+                    </svg>
+                    Link Google Account
+                  </button>
+                </div>
+              )}
+
+              {/* Reset Password Section — visible if user has email/password login */}
+              {(hasEmailProvider || authProviderFromProfile === "both") && (
+                <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
+                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                    Reset Password
+                  </label>
+                  <p className="text-sm text-text-secondary">
+                    We&apos;ll send a secure password reset link to your institutional email.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={isSendingResetEmail}
+                    onClick={async () => {
+                      setIsSendingResetEmail(true);
+                      setError("");
+                      setSuccess("");
+                      try {
+                        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+                          redirectTo: `${window.location.origin}/reset-password`,
+                        });
+                        if (resetError) throw resetError;
+                        setSuccess("Password reset link sent to your email. Check your inbox.");
+                      } catch (err: any) {
+                        setError(err.message || "Unable to send reset link.");
+                      } finally {
+                        setIsSendingResetEmail(false);
+                      }
+                    }}
+                    className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60 inline-flex items-center gap-2"
+                  >
+                    {isSendingResetEmail ? "Sending..." : "Send Password Reset Link"}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -1500,26 +1701,56 @@ export default function ProfilePage() {
                 </h3>
 
                 {(profile?.has_vehicle || additionalVehicles.length > 0) ? (
-                  <div className="flex flex-col justify-center h-full pb-8">
-                    <span className="text-white/30 text-xs font-bold uppercase tracking-widest text-center md:text-left mb-2">Registered Plate Number(s)</span>
-
+                  <div className="flex flex-col justify-center h-full pb-8 gap-4">
+                    {/* Primary Vehicle */}
                     {profile?.vehicle_no && (
-                      <div className="bg-black/50 border border-white/10 py-5 px-6 font-mono text-2xl tracking-[0.2em] uppercase text-center md:text-left flex items-center justify-between mb-3">
-                        {profile.vehicle_no}
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(34,197,94,1)]" />
+                      <div className="border border-white/10 rounded-sm overflow-hidden">
+                        <div className="bg-black/50 py-4 px-5 font-mono text-xl tracking-[0.2em] uppercase flex items-center justify-between">
+                          {profile.vehicle_no}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-green-400 not-italic font-sans">Primary</span>
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(34,197,94,1)]" />
+                          </div>
+                        </div>
+                        {(profile?.vehicle_type || profile?.vehicle_brand_model || profile?.vehicle_color) && (
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 px-5 py-3 bg-white/[0.02] border-t border-white/5">
+                            {profile.vehicle_type && (
+                              <span className="text-xs text-white/60"><span className="text-white/30">Type:</span> {profile.vehicle_type}</span>
+                            )}
+                            {profile.vehicle_brand_model && (
+                              <span className="text-xs text-white/60"><span className="text-white/30">Model:</span> {profile.vehicle_brand_model}</span>
+                            )}
+                            {profile.vehicle_color && (
+                              <span className="text-xs text-white/60"><span className="text-white/30">Color:</span> {profile.vehicle_color}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
+                    {/* Additional Vehicles */}
                     {additionalVehicles.map((vehicle) => (
-                      <div
-                        key={vehicle.id}
-                        className="bg-black/50 border border-white/10 py-3 px-5 font-mono text-lg tracking-[0.18em] uppercase text-center md:text-left mb-2"
-                      >
-                        {vehicle.vehicle_no}
+                      <div key={vehicle.id} className="border border-white/10 rounded-sm overflow-hidden">
+                        <div className="bg-black/50 py-3 px-5 font-mono text-lg tracking-[0.18em] uppercase">
+                          {vehicle.vehicle_no}
+                        </div>
+                        {(vehicle.vehicle_type || vehicle.vehicle_brand_model || vehicle.vehicle_color) && (
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 px-5 py-2.5 bg-white/[0.02] border-t border-white/5">
+                            {vehicle.vehicle_type && (
+                              <span className="text-xs text-white/60"><span className="text-white/30">Type:</span> {vehicle.vehicle_type}</span>
+                            )}
+                            {vehicle.vehicle_brand_model && (
+                              <span className="text-xs text-white/60"><span className="text-white/30">Model:</span> {vehicle.vehicle_brand_model}</span>
+                            )}
+                            {vehicle.vehicle_color && (
+                              <span className="text-xs text-white/60"><span className="text-white/30">Color:</span> {vehicle.vehicle_color}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
 
-                    <p className="text-xs text-text-secondary mt-4 text-center md:text-left">Actively tracked by NIE Parking Patrol authorization grids.</p>
+                    <p className="text-xs text-text-secondary mt-2 text-center md:text-left">Actively tracked by NIE Parking Patrol authorization grids.</p>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center text-center h-[150px] gap-2 p-6 border border-dashed border-white/10 rounded-sm">

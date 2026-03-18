@@ -74,6 +74,10 @@ function LoginContent() {
       setSuccess("You have been logged out from this session.");
       router.replace("/login");
     }
+    if (searchParams.get("reset") === "success") {
+      setSuccess("Password reset successfully! Sign in with your new password.");
+      router.replace("/login");
+    }
   }, [searchParams, router]);
 
   useEffect(() => {
@@ -334,6 +338,11 @@ function LoginContent() {
                         <Eye className="w-5 h-5" />
                       )}
                     </button>
+                  </div>
+                  <div className="flex justify-end mt-1">
+                    <Link href="/forgot-password" className="text-accent-amber/80 hover:text-accent-amber hover:underline text-[11px] font-bold uppercase tracking-wider transition-colors">
+                      Forgot Password?
+                    </Link>
                   </div>
                 </motion.div>
               )}

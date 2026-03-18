@@ -35,7 +35,9 @@ export async function middleware(request: NextRequest) {
     user &&
     needsOnboarding &&
     !pathname.startsWith('/signup/complete') &&
-    !pathname.startsWith('/auth/callback')
+    !pathname.startsWith('/auth/callback') &&
+    !pathname.startsWith('/forgot-password') &&
+    !pathname.startsWith('/reset-password')
   ) {
     const url = request.nextUrl.clone();
     url.pathname = '/signup/complete';

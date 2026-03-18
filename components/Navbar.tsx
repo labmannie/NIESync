@@ -88,7 +88,7 @@ export function Navbar() {
       >
         {/* Logo */}
         <Link href="/" className="flex items-center gap-3 text-white hover:opacity-90 transition-opacity z-50 group">
-          <Image src="/logo.png" alt="NIE Sync Logo" width={32} height={32} className="w-8 h-8 object-contain group-hover:scale-110 transition-transform duration-300" />
+          <Image src="/logo.png" alt="NIE Sync Logo" width={40} height={40} className="w-9 h-9 object-contain group-hover:scale-110 transition-transform duration-300 drop-shadow-[0_0_6px_rgba(255,255,255,0.3)]" />
           <span className="font-extrabold text-2xl tracking-wide">NIE Sync</span>
         </Link>
         

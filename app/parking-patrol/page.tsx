@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
@@ -179,7 +179,7 @@ function getThreadRoleLabel(
   return message.sender_role === "owner" ? "Vehicle Owner" : "Reporter";
 }
 
-export default function ParkingPatrolPage() {
+function ParkingPatrolPageContent() {
   const supabase = useMemo(() => createClient(), []);
   const searchParams = useSearchParams();
 
@@ -1054,5 +1054,30 @@ export default function ParkingPatrolPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function ParkingPatrolPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-36 text-white md:px-8">
+          <div className="mx-auto w-full max-w-7xl animate-pulse space-y-6">
+            <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
+            <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="space-y-6">
+                <div className="h-64 rounded-3xl border border-white/10 bg-white/[0.03]" />
+                <div className="h-80 rounded-3xl border border-white/10 bg-white/[0.03]" />
+              </div>
+              <div className="space-y-6">
+                <div className="h-[560px] rounded-3xl border border-white/10 bg-white/[0.03]" />
+              </div>
+            </div>
+          </div>
+        </main>
+      }
+    >
+      <ParkingPatrolPageContent />
+    </Suspense>
   );
 }

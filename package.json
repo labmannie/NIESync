@@ -16,6 +16,7 @@
     "framer-motion": "^12.35.2",
     "lucide-react": "^0.469.0",
     "next": "^15.1.9",
+    "nodemailer": "^8.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-phone-number-input": "^3.4.16",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/nodemailer": "^7.0.11",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-phone-number-input": "^3.0.17",

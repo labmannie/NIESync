@@ -7,23 +7,22 @@ import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ArrowRight, Car, 
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { normalizePhoneNumber, isValidPhoneNumber } from "@/lib/phone";
+import {
+  normalizePhoneNumber,
+  validateRequiredPhoneNumber,
+} from "@/lib/phone";
+import {
+  formatOwnerVehiclePlateInput,
+  getOwnerVehiclePlateFormatsHint,
+  validateOwnerVehiclePlate,
+} from "@/lib/vehiclePlate";
 import 'react-phone-number-input/style.css';
 import PhoneInput from 'react-phone-number-input';
+import { GoogleMark } from "@/app/_components/GoogleMark";
 
 const BATCH_OPTIONS = ["ISE", "CSE", "CSE(AI/ML)", "MECHANICAL", "CIVIL", "ECE", "EEE", "OTHER"];
 const YEAR_OPTIONS = ["I Year", "II Year", "III Year", "IV Year"];
-const VEHICLE_PLATE_REGEX = /^[A-Z]{2}-\d{2}-[A-Z]{1,3}-\d{4}$/;
 const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
-
-function formatVehicleNumber(value: string) {
-  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
-  const match = cleaned.match(/^([A-Z]{0,2})(\d{0,2})([A-Z]{0,3})(\d{0,4})$/);
-
-  if (!match) return "";
-
-  return [match[1], match[2], match[3], match[4]].filter(Boolean).join("-");
-}
 
 function isVehicleAlreadyRegisteredError(error: any) {
   const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
@@ -89,7 +88,7 @@ function formatDateTime(timestamp?: string | null) {
 }
 
 function SkeletonBlock({ className }: { className: string }) {
-  return <div className={`skeleton-shimmer rounded-sm ${className}`} aria-hidden="true" />;
+  return <div className={`skeleton-shimmer rounded-xl ${className}`} aria-hidden="true" />;
 }
 
 type SessionDeviceRow = {
@@ -372,23 +371,24 @@ export default function ProfilePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const normalizedPhone = normalizePhoneNumber(phoneDraft);
-      if (normalizedPhone && !isValidPhoneNumber(normalizedPhone)) {
-        throw new Error("Please enter a valid phone number.");
-      }
+      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
+        phoneDraft,
+        { invalidMessage: "Please enter a valid phone number." }
+      );
+      if (phoneError) throw new Error(phoneError);
 
       const { error: updateError } = await supabase
         .from("profiles")
-        .update({ phone: normalizedPhone || null })
+        .update({ phone: normalizedPhone })
         .eq("id", user.id);
 
       if (updateError) throw updateError;
 
-      setProfile((prev: any) => ({ ...prev, phone: normalizedPhone || null }));
+      setProfile((prev: any) => ({ ...prev, phone: normalizedPhone }));
       setEditForm((prev) => ({ ...prev, phone: normalizedPhone }));
       setPhoneDraft(normalizedPhone);
       setIsEditingPhone(false);
-      setSuccess(normalizedPhone ? "Phone number updated." : "Phone number removed.");
+      setSuccess("Phone number updated.");
     } catch (err: any) {
       setError(err.message || "Unable to save phone number.");
     } finally {
@@ -595,7 +595,7 @@ export default function ProfilePage() {
     setEditAdditionalVehicles((prev) =>
       prev.map((item, itemIndex) =>
         itemIndex === index
-          ? { ...item, [field]: field === "vehicleNo" ? formatVehicleNumber(value) : value }
+          ? { ...item, [field]: field === "vehicleNo" ? formatOwnerVehiclePlateInput(value) : value }
           : item
       )
     );
@@ -659,36 +659,46 @@ export default function ProfilePage() {
         throw new Error("First name and last name are required.");
       }
 
-      const normalizedPhone = normalizePhoneNumber(editForm.phone || "");
-      if (!normalizedPhone) {
-        throw new Error("Phone number is required. Please enter your phone number.");
-      }
-      if (!isValidPhoneNumber(normalizedPhone)) {
-        throw new Error("Please enter a valid phone number.");
-      }
+      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
+        editForm.phone || "",
+        { invalidMessage: "Please enter a valid phone number." }
+      );
+      if (phoneError) throw new Error(phoneError);
 
-      if (editForm.hasVehicle && !editForm.vehicleNo) {
-        throw new Error("Vehicle number is required if you have a vehicle.");
-      }
-      if (editForm.hasVehicle && !VEHICLE_PLATE_REGEX.test(editForm.vehicleNo)) {
-        throw new Error("Use a valid plate format: KA-09-AB-1234.");
-      }
+      const primaryVehicleValidation = editForm.hasVehicle
+        ? validateOwnerVehiclePlate(editForm.vehicleNo, {
+          required: true,
+          requiredMessage: "Vehicle number is required if you have a vehicle.",
+        })
+        : { plate: "", error: "" };
+      if (primaryVehicleValidation.error) throw new Error(primaryVehicleValidation.error);
       if (editForm.role === "Hostelite" && !editForm.roomNo) {
         throw new Error("Room number is required for hostelites.");
       }
 
       const normalizedAdditionalVehicles = editForm.hasVehicle
         ? editAdditionalVehicles
-          .map((v) => ({ ...v, vehicleNo: formatVehicleNumber(v.vehicleNo) }))
-          .filter((v) => v.vehicleNo)
+          .map((v) => {
+            const vehicleNoDraft = formatOwnerVehiclePlateInput(v.vehicleNo);
+            if (!vehicleNoDraft) return null;
+            const validation = validateOwnerVehiclePlate(vehicleNoDraft, {
+              required: true,
+              invalidMessage: `Each additional vehicle must be a valid Indian plate. ${getOwnerVehiclePlateFormatsHint()}`,
+            });
+            if (validation.error) {
+              throw new Error(validation.error);
+            }
+            return {
+              ...v,
+              vehicleNo: validation.plate,
+            };
+          })
+          .filter((v): v is { vehicleNo: string; vehicleType: string; vehicleBrandModel: string; vehicleColor: string } => Boolean(v))
         : [];
 
       const duplicateVehicleValues = new Set<string>();
       for (const v of normalizedAdditionalVehicles) {
-        if (!VEHICLE_PLATE_REGEX.test(v.vehicleNo)) {
-          throw new Error("Each additional vehicle must follow format KA-09-AB-1234.");
-        }
-        if (v.vehicleNo === editForm.vehicleNo) {
+        if (v.vehicleNo === primaryVehicleValidation.plate) {
           throw new Error("Primary and additional vehicles cannot be the same.");
         }
         if (duplicateVehicleValues.has(v.vehicleNo)) {
@@ -703,13 +713,13 @@ export default function ProfilePage() {
         batch: editForm.batch || null,
         year_of_study: editForm.year || null,
         username: normalizedUsername || null,
-        phone: normalizedPhone || null,
+        phone: normalizedPhone,
         role: editForm.role,
         campus: editForm.role === "Hostelite" ? null : editForm.campus,
         hostel_name: editForm.role === "Hostelite" ? editForm.hostelName : null,
         room_no: editForm.role === "Hostelite" ? editForm.roomNo : null,
         has_vehicle: editForm.hasVehicle,
-        vehicle_no: editForm.hasVehicle ? editForm.vehicleNo : null,
+        vehicle_no: editForm.hasVehicle ? primaryVehicleValidation.plate : null,
         vehicle_type: editForm.hasVehicle ? (editForm.vehicleType || null) : null,
         vehicle_brand_model: editForm.hasVehicle ? (editForm.vehicleBrandModel.trim() || null) : null,
         vehicle_color: editForm.hasVehicle ? (editForm.vehicleColor.trim() || null) : null
@@ -831,58 +841,58 @@ export default function ProfilePage() {
 
   if (isProfileLoading) {
     return (
-      <main className="min-h-screen bg-campus-black text-white relative flex justify-center pb-20">
-        <div className="absolute top-0 left-0 w-full h-[300px] overflow-hidden pointer-events-none before:absolute before:inset-0 before:bg-gradient-to-b before:from-transparent before:to-campus-black z-0">
-          <div className="absolute -top-[100px] left-1/2 -translate-x-1/2 w-full max-w-4xl h-[400px] bg-accent-blue/10 blur-[120px] rounded-full" />
+      <main className="relative flex min-h-screen justify-center bg-campus-black pb-20 text-white">
+        <div className="absolute left-0 top-0 h-[300px] w-full overflow-hidden pointer-events-none before:absolute before:inset-0 before:bg-gradient-to-b before:from-transparent before:to-campus-black z-0">
+          <div className="absolute -top-[100px] left-1/2 h-[400px] w-full max-w-4xl -translate-x-1/2 rounded-full bg-accent-blue/10 blur-[120px]" />
         </div>
 
-        <div className="w-full max-w-5xl pt-28 px-4 md:px-8 lg:px-10 relative z-10">
-          <div className="flex justify-between items-center mb-8">
-            <SkeletonBlock className="h-8 w-28" />
-            <SkeletonBlock className="h-9 w-28" />
+        <div className="relative z-10 w-full max-w-6xl px-4 pt-28 md:px-8 lg:px-10">
+          <div className="mb-8 flex items-center justify-between">
+            <SkeletonBlock className="h-8 w-32 rounded-xl" />
+            <SkeletonBlock className="h-10 w-36 rounded-xl" />
           </div>
 
-          <div className="glass-card p-6 md:p-10 rounded-sm border border-white/10 flex flex-col md:flex-row items-start gap-6 md:gap-8 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent-blue via-cyan-400 to-transparent" />
-            <SkeletonBlock className="w-32 h-32 md:w-40 md:h-40 rounded-full" />
+          <div className="skeleton-surface relative overflow-hidden rounded-3xl p-6 md:p-10">
+            <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-accent-blue via-cyan-400 to-transparent" />
+            <div className="flex flex-col items-start gap-6 md:flex-row md:gap-8">
+              <SkeletonBlock className="h-32 w-32 rounded-full md:h-40 md:w-40" />
 
-            <div className="flex-1 w-full space-y-5">
-              <div className="space-y-3">
-                <SkeletonBlock className="h-12 w-full max-w-lg" />
-                <SkeletonBlock className="h-8 w-44 rounded-full" />
-                <SkeletonBlock className="h-4 w-40" />
+              <div className="w-full flex-1 space-y-5">
+                <div className="space-y-3">
+                  <SkeletonBlock className="h-12 w-full max-w-xl rounded-xl" />
+                  <SkeletonBlock className="h-8 w-48 rounded-full" />
+                  <SkeletonBlock className="h-4 w-44 rounded-lg" />
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <SkeletonBlock className="h-9 w-72 rounded-xl" />
+                  <SkeletonBlock className="h-9 w-44 rounded-xl" />
+                  <SkeletonBlock className="h-9 w-44 rounded-xl" />
+                </div>
               </div>
-              <div className="flex flex-wrap gap-3">
-                <SkeletonBlock className="h-9 w-64" />
-                <SkeletonBlock className="h-9 w-40" />
-                <SkeletonBlock className="h-9 w-44" />
-                <SkeletonBlock className="h-9 w-36" />
-              </div>
             </div>
           </div>
 
-          <div className="mt-6 grid md:grid-cols-2 gap-6">
-            <div className="glass-card p-6 rounded-sm border border-white/10 space-y-4">
-              <SkeletonBlock className="h-5 w-56" />
-              <SkeletonBlock className="h-4 w-32" />
-              <SkeletonBlock className="h-10 w-full" />
-              <SkeletonBlock className="h-4 w-40" />
-              <SkeletonBlock className="h-16 w-full" />
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <div className="skeleton-surface space-y-4 rounded-3xl p-6">
+              <SkeletonBlock className="h-5 w-56 rounded-lg" />
+              <SkeletonBlock className="h-11 w-full rounded-xl" />
+              <SkeletonBlock className="h-11 w-full rounded-xl" />
+              <SkeletonBlock className="h-11 w-3/4 rounded-xl" />
             </div>
-            <div className="glass-card p-6 rounded-sm border border-white/10 space-y-4">
-              <SkeletonBlock className="h-5 w-48" />
-              <SkeletonBlock className="h-16 w-full" />
-              <SkeletonBlock className="h-14 w-full" />
-              <SkeletonBlock className="h-3 w-3/4" />
+            <div className="skeleton-surface space-y-4 rounded-3xl p-6">
+              <SkeletonBlock className="h-5 w-48 rounded-lg" />
+              <SkeletonBlock className="h-20 w-full rounded-2xl" />
+              <SkeletonBlock className="h-16 w-full rounded-2xl" />
+              <SkeletonBlock className="h-4 w-2/3 rounded-lg" />
             </div>
           </div>
 
-          <div className="mt-6 glass-card p-6 rounded-sm border border-white/10 space-y-4">
-            <SkeletonBlock className="h-5 w-40" />
-            <SkeletonBlock className="h-12 w-full" />
-            <div className="flex flex-col md:flex-row gap-3">
-              <SkeletonBlock className="h-11 w-full md:w-44" />
-              <SkeletonBlock className="h-11 w-full md:w-44" />
+          <div className="mt-6 skeleton-surface space-y-4 rounded-3xl p-6">
+            <SkeletonBlock className="h-5 w-52 rounded-lg" />
+            <SkeletonBlock className="h-14 w-full rounded-2xl" />
+            <div className="flex flex-col gap-3 md:flex-row">
+              <SkeletonBlock className="h-11 w-full rounded-xl md:w-48" />
+              <SkeletonBlock className="h-11 w-full rounded-xl md:w-48" />
             </div>
           </div>
         </div>
@@ -1008,7 +1018,7 @@ export default function ProfilePage() {
           </div>
 
           <div className="flex-1 w-full min-w-0">
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-5">
+            <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
               <div className="text-center md:text-left min-w-0">
                 <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight leading-tight break-words flex flex-wrap items-center justify-center md:justify-start gap-3">
                   <span>{profile?.first_name} <span className="text-white/40">{profile?.last_name}</span></span>
@@ -1049,78 +1059,73 @@ export default function ProfilePage() {
                     {profile?.role} @ NIE
                   </p>
                 </div>
+                <p className="mt-3 text-xs uppercase tracking-[0.18em] text-text-secondary">
+                  Profile Overview
+                </p>
               </div>
 
-              <div className="flex flex-col items-start md:items-end gap-3 w-full md:w-auto">
-                {!isEditing && !hasGoogleProvider && !isEmailVerified && (
+              <div className="w-full md:w-auto rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left md:text-right">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-text-secondary">
+                  Account State
+                </p>
+                <p className="mt-1 text-sm font-semibold text-white">
+                  {isVerifiedUser ? "Verified Identity" : "Verification Pending"}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {!isEditing && (
+          <section className="mt-6 grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+            <div className="glass-card rounded-sm border border-white/10 p-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
+                    Contact and Verification
+                  </h2>
+                  <p className="mt-2 text-sm text-white/80">
+                    Keep contact and identity metadata current for faster support and recoveries.
+                  </p>
+                </div>
+                {!hasGoogleProvider && !isEmailVerified && (
                   <button
                     type="button"
                     onClick={handleSendVerificationEmail}
                     disabled={isSendingVerificationEmail}
-                    className="w-full md:w-auto bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 md:px-4 md:py-2.5 rounded-sm text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
+                    className="w-full md:w-auto bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-2 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
                   >
                     {isSendingVerificationEmail ? "Sending..." : "Verify Email"}
                   </button>
                 )}
               </div>
-            </div>
 
-            <div className="mt-6 flex flex-wrap gap-2 md:gap-3 items-center justify-center md:justify-start text-xs md:text-xs font-bold text-text-secondary uppercase tracking-wider">
-              <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
-                <Mail className="w-4 h-4 md:w-4 md:h-4" />
-                {email}
-              </div>
-              {hasGoogleProvider && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
-                  <svg viewBox="0 0 24 24" className="w-4 h-4 md:w-4 md:h-4" aria-hidden="true">
-                    <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.2-.9 2.2-2 2.9l3.2 2.5c1.9-1.7 2.9-4.2 2.9-7.1 0-.7-.1-1.5-.2-2.2H12Z" />
-                    <path fill="#34A853" d="M12 21.5c2.7 0 4.9-.9 6.6-2.4l-3.2-2.5c-.9.6-2 .9-3.4.9-2.6 0-4.8-1.8-5.6-4.2l-3.3 2.5c1.7 3.4 5.2 5.7 8.9 5.7Z" />
-                    <path fill="#4A90E2" d="M6.4 13.3c-.2-.6-.3-1.2-.3-1.8s.1-1.3.3-1.8L3 7.2C2.4 8.5 2 9.9 2 11.5c0 1.6.4 3 1 4.3l3.4-2.5Z" />
-                    <path fill="#FBBC05" d="M12 5.4c1.5 0 2.8.5 3.8 1.5l2.8-2.8C16.9 2.6 14.7 1.5 12 1.5c-3.7 0-7.2 2.3-8.9 5.7l3.4 2.5C7.2 7.2 9.4 5.4 12 5.4Z" />
-                  </svg>
-                  Connected
+              <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wider text-text-secondary">
+                <div className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2">
+                  <Mail className="h-4 w-4" />
+                  <span className="normal-case tracking-normal text-white">{email}</span>
                 </div>
-              )}
-              {hasEmailProvider && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5 normal-case tracking-normal text-white">
-                  <Mail className="w-4 h-4 md:w-4 md:h-4 text-accent-blue" />
-                  Direct Access
-                </div>
-              )}
-              {profile?.username && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
-                  <span className="text-white/40">USER_</span>
-                  <span className="text-white">@{profile.username}</span>
-                </div>
-              )}
-              {profile?.user_type && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
-                  <span className="text-white/40">TYPE_</span>
-                  <span className="text-white">{profile.user_type}</span>
-                </div>
-              )}
-              {profile?.usn && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
-                  <span className="text-white/40">USN_</span>
-                  <span className="text-white">{profile.usn}</span>
-                </div>
-              )}
-              {profile?.batch && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
-                  <span className="text-white/40">BATCH_</span>
-                  <span className="text-white">{profile.batch}</span>
-                </div>
-              )}
-              {profile?.year_of_study && (
-                <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5">
-                  <span className="text-white/40">YEAR_</span>
-                  <span className="text-white">{profile.year_of_study}</span>
-                </div>
-              )}
-              {!isEditing && (
-                isEditingPhone ? (
-                  <div className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-accent-blue/40 normal-case tracking-normal text-white min-w-[220px]">
-                    <Phone className="w-4 h-4 md:w-4 md:h-4 text-accent-blue" />
+                {hasGoogleProvider && (
+                  <div className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2 normal-case tracking-normal text-white">
+                    <GoogleMark className="h-4 w-4" />
+                    Connected
+                  </div>
+                )}
+                {hasEmailProvider && (
+                  <div className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2 normal-case tracking-normal text-white">
+                    <Mail className="h-4 w-4 text-accent-blue" />
+                    Direct Access
+                  </div>
+                )}
+                {profile?.username && (
+                  <div className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2">
+                    <span className="text-white/40">USER_</span>
+                    <span className="normal-case tracking-normal text-white">@{profile.username}</span>
+                  </div>
+                )}
+                {isEditingPhone ? (
+                  <div className="flex min-w-[220px] items-center gap-2 rounded-sm border border-accent-blue/40 bg-white/5 px-3 py-2 normal-case tracking-normal text-white">
+                    <Phone className="h-4 w-4 text-accent-blue" />
                     <PhoneInput
                       international
                       defaultCountry="IN"
@@ -1130,43 +1135,83 @@ export default function ProfilePage() {
                       name="phone"
                       autoComplete="tel"
                       inputMode="tel"
-                      className="bg-transparent text-xs md:text-sm flex-1 outline-none text-white placeholder:text-white/30 PhoneInputOverride"
+                      className="PhoneInputOverride flex-1 bg-transparent text-xs md:text-sm outline-none placeholder:text-white/30 text-white"
                     />
                     <button
                       type="button"
                       onClick={handleInlinePhoneSave}
                       disabled={isSavingPhone}
-                      className="p-1 rounded-sm text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+                      className="rounded-sm p-1 text-green-400 transition-colors hover:bg-green-500/10 disabled:opacity-50"
                       aria-label="Save phone number"
                     >
-                      {isSavingPhone ? <Loader2 className="w-4 h-4 md:w-4 md:h-4 animate-spin" /> : <Check className="w-4 h-4 md:w-4 md:h-4" />}
+                      {isSavingPhone ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4" />
+                      )}
                     </button>
                     <button
                       type="button"
                       onClick={cancelInlinePhoneEdit}
                       disabled={isSavingPhone}
-                      className="p-1 rounded-sm text-text-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                      className="rounded-sm p-1 text-text-secondary transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
                       aria-label="Cancel phone edit"
                     >
-                      <X className="w-4 h-4 md:w-4 md:h-4" />
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={startInlinePhoneEdit}
-                    className="flex items-center gap-2 bg-white/5 py-2 px-3 md:py-2 md:px-3 rounded-sm border border-white/5 hover:border-accent-blue/40 hover:text-white transition-colors normal-case tracking-normal"
+                    className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2 normal-case tracking-normal transition-colors hover:border-accent-blue/40 hover:text-white"
                     aria-label="Edit phone number"
                   >
-                    <Phone className="w-4 h-4 md:w-4 md:h-4" />
+                    <Phone className="h-4 w-4" />
                     <span>{profile?.phone || "Add phone number"}</span>
-                    <Edit2 className="w-3.5 h-3.5 md:w-3.5 md:h-3.5 opacity-70" />
+                    <Edit2 className="h-3.5 w-3.5 opacity-70" />
                   </button>
-                )
-              )}
+                )}
+              </div>
+
+              <p
+                className={`mt-4 rounded-sm border p-3 text-sm ${
+                  isVerifiedUser
+                    ? "border-green-500/30 bg-green-500/10 text-green-300"
+                    : "border-accent-amber/30 bg-accent-amber/10 text-accent-amber"
+                }`}
+              >
+                {isVerifiedUser
+                  ? verificationMethodText
+                  : "Unverified account. Complete verification to enable trusted account status."}
+              </p>
             </div>
-          </div>
-        </div>
+
+            <div className="glass-card rounded-sm border border-white/10 p-6">
+              <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
+                Identity Snapshot
+              </h2>
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-2">
+                  <span className="text-text-secondary">User Type</span>
+                  <span className="font-semibold text-white">{profile?.user_type || "--"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-2">
+                  <span className="text-text-secondary">USN</span>
+                  <span className="font-semibold text-white">{profile?.usn || "--"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-2">
+                  <span className="text-text-secondary">Batch</span>
+                  <span className="font-semibold text-white">{profile?.batch || "--"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-text-secondary">Current Year</span>
+                  <span className="font-semibold text-white">{profile?.year_of_study || "--"}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Status Messaging */}
         <AnimatePresence>
@@ -1190,6 +1235,11 @@ export default function ProfilePage() {
             </h3>
 
             <div className="grid md:grid-cols-2 gap-8">
+              <div className="md:col-span-2">
+                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-text-secondary">
+                  Identity Details
+                </h4>
+              </div>
               <div className="flex flex-col gap-2">
                 <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">First Name</label>
                 <input
@@ -1284,6 +1334,11 @@ export default function ProfilePage() {
                 </select>
               </div>
 
+              <div className="md:col-span-2 pt-2 border-t border-white/10">
+                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-text-secondary">
+                  Residency
+                </h4>
+              </div>
               {editForm.role === "Hostelite" ? (
                 <>
                   <div className="flex flex-col gap-2">
@@ -1323,6 +1378,9 @@ export default function ProfilePage() {
               )}
 
               <div className="flex flex-col gap-4 md:col-span-2 border-t border-white/10 pt-6 mt-2">
+                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-text-secondary">
+                  Vehicles
+                </h4>
                 <div className="flex flex-col gap-2">
                   <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Do you drive a vehicle to campus?</label>
                   <div className="flex gap-4">
@@ -1354,12 +1412,15 @@ export default function ProfilePage() {
                         onChange={(e) =>
                           setEditForm((prev) => ({
                             ...prev,
-                            vehicleNo: formatVehicleNumber(e.target.value),
+                            vehicleNo: formatOwnerVehiclePlateInput(e.target.value),
                           }))
                         }
-                        placeholder="KA-09-XX-XXXX"
+                        placeholder="KA-09-AB-1234 or 22-BH-1234-AA"
                         className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
                       />
+                      <p className="text-[10px] text-text-secondary uppercase tracking-wider">
+                        {getOwnerVehiclePlateFormatsHint()}
+                      </p>
                     </div>
 
                     {/* Vehicle Type Toggle */}
@@ -1451,7 +1512,7 @@ export default function ProfilePage() {
                           type="text"
                           value={vehicle.vehicleNo}
                           onChange={(e) => updateAdditionalVehicleField(index, "vehicleNo", e.target.value)}
-                          placeholder="KA-09-XX-XXXX"
+                          placeholder="KA-09-AB-1234"
                           className="w-full bg-black/40 border border-white/10 rounded-sm p-3 text-base font-mono tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
                         />
                         <div className="flex gap-3">
@@ -1490,6 +1551,9 @@ export default function ProfilePage() {
               </div>
 
               <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
+                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-text-secondary">
+                  Account Security and Access
+                </h4>
                 <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
                   Email Verification Status
                 </label>
@@ -1598,12 +1662,7 @@ export default function ProfilePage() {
                     }}
                     className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors inline-flex items-center gap-3"
                   >
-                    <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden="true">
-                      <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.2-.9 2.2-2 2.9l3.2 2.5c1.9-1.7 2.9-4.2 2.9-7.1 0-.7-.1-1.5-.2-2.2H12Z" />
-                      <path fill="#34A853" d="M12 21.5c2.7 0 4.9-.9 6.6-2.4l-3.2-2.5c-.9.6-2 .9-3.4.9-2.6 0-4.8-1.8-5.6-4.2l-3.3 2.5c1.7 3.4 5.2 5.7 8.9 5.7Z" />
-                      <path fill="#4A90E2" d="M6.4 13.3c-.2-.6-.3-1.2-.3-1.8s.1-1.3.3-1.8L3 7.2C2.4 8.5 2 9.9 2 11.5c0 1.6.4 3 1 4.3l3.4-2.5Z" />
-                      <path fill="#FBBC05" d="M12 5.4c1.5 0 2.8.5 3.8 1.5l2.8-2.8C16.9 2.6 14.7 1.5 12 1.5c-3.7 0-7.2 2.3-8.9 5.7l3.4 2.5C7.2 7.2 9.4 5.4 12 5.4Z" />
-                    </svg>
+                    <GoogleMark className="w-5 h-5" />
                     Link Google Account
                   </button>
                 </div>
@@ -1647,6 +1706,11 @@ export default function ProfilePage() {
           </div>
         ) : (
           <>
+            <div className="mt-6 mb-3">
+              <h2 className="text-xs font-black uppercase tracking-[0.22em] text-text-secondary">
+                Security and Sessions
+              </h2>
+            </div>
             <div className="glass-card p-6 rounded-sm border border-white/10 relative mt-6">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary flex items-center gap-2 mb-4">
                 <Laptop className="w-4 h-4" /> Active Sessions
@@ -1674,6 +1738,11 @@ export default function ProfilePage() {
 
 
             {/* View Mode Identity Specifics */}
+            <div className="mt-7 mb-3">
+              <h2 className="text-xs font-black uppercase tracking-[0.22em] text-text-secondary">
+                Residency and Vehicles
+              </h2>
+            </div>
             <div className="grid md:grid-cols-2 gap-6 mt-6">
               <div className="glass-card p-6 rounded-sm border border-white/10 relative">
                 <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary flex items-center gap-2 mb-6">
@@ -1761,6 +1830,11 @@ export default function ProfilePage() {
               </div>
             </div>
 
+            <div className="mt-7 mb-3">
+              <h2 className="text-xs font-black uppercase tracking-[0.22em] text-text-secondary">
+                Security and Data Controls
+              </h2>
+            </div>
             <div className="glass-card p-6 rounded-sm border border-white/10 relative mt-6">
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary mb-4">
                 Data Controls

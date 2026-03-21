@@ -81,7 +81,7 @@ function extractSessionIdFromJwt(accessToken?: string | null) {
 }
 
 function SkeletonBlock({ className }: { className: string }) {
-  return <div className={`skeleton-shimmer rounded-sm ${className}`} aria-hidden="true" />;
+  return <div className={`skeleton-shimmer rounded-xl ${className}`} aria-hidden="true" />;
 }
 
 export default function SessionsPage() {
@@ -274,9 +274,13 @@ export default function SessionsPage() {
 
             {isSessionsLoading ? (
               <div className="space-y-4">
-                <SkeletonBlock className="h-16 w-full" />
-                <SkeletonBlock className="h-16 w-full" />
-                <SkeletonBlock className="h-16 w-full" />
+                <div className="skeleton-surface rounded-2xl p-4 space-y-3">
+                  <SkeletonBlock className="h-5 w-40" />
+                  <SkeletonBlock className="h-4 w-56" />
+                </div>
+                <SkeletonBlock className="h-20 w-full rounded-2xl" />
+                <SkeletonBlock className="h-20 w-full rounded-2xl" />
+                <SkeletonBlock className="h-20 w-full rounded-2xl" />
               </div>
             ) : (
               <div className="space-y-8">

@@ -7,26 +7,25 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
-import { normalizePhoneNumber, isValidPhoneNumber } from "@/lib/phone";
+import { GoogleMark } from "@/app/_components/GoogleMark";
+import {
+  normalizePhoneNumber,
+  validateRequiredPhoneNumber,
+} from "@/lib/phone";
+import {
+  formatOwnerVehiclePlateInput,
+  getOwnerVehiclePlateFormatsHint,
+  validateOwnerVehiclePlate,
+} from "@/lib/vehiclePlate";
 import 'react-phone-number-input/style.css';
 import PhoneInput from 'react-phone-number-input';
 
 const TOTAL_STEPS = 4;
 const BATCH_OPTIONS = ["ISE", "CSE", "CSE(AI/ML)", "MECHANICAL", "CIVIL", "ECE", "EEE", "OTHER"];
 const YEAR_OPTIONS = ["I Year", "II Year", "III Year", "IV Year"];
-const VEHICLE_PLATE_REGEX = /^[A-Z]{2}-\d{2}-[A-Z]{1,3}-\d{4}$/;
 const DOMAIN_RESTRICTION_MESSAGE = "Access restricted to NIE students and staff only.";
 const GROUP_EMAIL_BLOCK_MESSAGE =
   "Group email addresses are not allowed for individual accounts.";
-
-function formatVehicleNumber(value: string) {
-  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
-  const match = cleaned.match(/^([A-Z]{0,2})(\d{0,2})([A-Z]{0,3})(\d{0,4})$/);
-
-  if (!match) return "";
-
-  return [match[1], match[2], match[3], match[4]].filter(Boolean).join("-");
-}
 
 function isVehicleAlreadyRegisteredError(error: any) {
   const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
@@ -110,7 +109,7 @@ function SignupContent() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    const nextValue = name === "vehicleNo" ? formatVehicleNumber(value) : value;
+    const nextValue = name === "vehicleNo" ? formatOwnerVehiclePlateInput(value) : value;
     setFormData(prev => ({ ...prev, [name]: nextValue }));
     if (error) setError("");
   };
@@ -226,9 +225,11 @@ function SignupContent() {
         setError("USN, batch, and year are required for students.");
         return;
       }
-      const normalizedPhone = normalizePhoneNumber(formData.phone);
-      if (!isValidPhoneNumber(normalizedPhone)) {
-        setError("Please enter a valid full phone number.");
+      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
+        formData.phone
+      );
+      if (phoneError) {
+        setError(phoneError);
         return;
       }
       setFormData((prev) => ({ ...prev, phone: normalizedPhone }));
@@ -261,17 +262,19 @@ function SignupContent() {
 
   const handleComplete = async (e: React.FormEvent) => {
     e.preventDefault();
-    const normalizedPhone = normalizePhoneNumber(formData.phone);
-    if (!isValidPhoneNumber(normalizedPhone)) {
-      setError("Please enter a valid full phone number.");
+    const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
+      formData.phone
+    );
+    if (phoneError) {
+      setError(phoneError);
       return;
     }
-    if (formData.hasVehicle === "Yes" && !formData.vehicleNo) {
-      setError("Please provide your vehicle number.");
-      return;
-    }
-    if (formData.hasVehicle === "Yes" && !VEHICLE_PLATE_REGEX.test(formData.vehicleNo)) {
-      setError("Use a valid plate format: KA-09-AB-1234.");
+    const vehicleValidation =
+      formData.hasVehicle === "Yes"
+        ? validateOwnerVehiclePlate(formData.vehicleNo, { required: true })
+        : { plate: "", error: "" };
+    if (vehicleValidation.error) {
+      setError(vehicleValidation.error);
       return;
     }
 
@@ -325,7 +328,7 @@ function SignupContent() {
       hostel_name: normalizedRole === "Hostelite" ? formData.hostelName : null,
       room_no: normalizedRole === "Hostelite" ? formData.roomNo : null,
       has_vehicle: formData.hasVehicle === "Yes",
-      vehicle_no: formData.hasVehicle === "Yes" ? formData.vehicleNo : null,
+      vehicle_no: formData.hasVehicle === "Yes" ? vehicleValidation.plate : null,
       auth_provider: "email",
       email_verified: false,
     };
@@ -642,12 +645,7 @@ function SignupContent() {
                         disabled={!acceptedPolicies}
                         className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white font-semibold py-3.5 rounded-sm transition-colors flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
-                          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                        </svg>
+                        <GoogleMark className="w-5 h-5" />
                         <span>Google Workplace (@nie.ac.in)</span>
                       </button>
                       {!acceptedPolicies && (
@@ -767,11 +765,7 @@ function SignupContent() {
                         </div>
                       </div>
                     </>
-                  ) : (
-                    <div className="text-xs text-text-secondary bg-white/5 p-3 rounded-sm border border-white/10">
-                      Faculty registration selected. USN, batch, and year are not required.
-                    </div>
-                  )}
+                  ) : null}
 
                   <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
@@ -834,11 +828,7 @@ function SignupContent() {
                         ))}
                       </div>
                     </div>
-                  ) : (
-                    <div className="text-xs text-text-secondary bg-white/5 p-3 rounded-sm border border-white/10">
-                      Faculty registration selected. Campus status is automatically set to Faculty.
-                    </div>
-                  )}
+                  ) : null}
 
                   {formData.userType === "Student" && formData.role === "Hostelite" ? (
                     <div className="flex flex-col gap-4 mt-2">
@@ -930,13 +920,13 @@ function SignupContent() {
                         <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">License Plate Number</label>
                         <input 
                           type="text" name="vehicleNo" value={formData.vehicleNo} onChange={handleChange} 
-                          placeholder="KA-09-XX-XXXX" 
+                          placeholder="KA-09-AB-1234 or 22-BH-1234-AA" 
                           className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
                           autoFocus
                         />
                         <div className="flex items-center gap-2 mt-2 text-text-secondary bg-white/5 p-3 rounded-sm">
                           <Info className="w-4 h-4 shrink-0" />
-                          <span className="text-xs leading-relaxed">By registering this vehicle, you permit the NIE Sync Parking Patrol system to verify your parking authorization organically.</span>
+                          <span className="text-xs leading-relaxed">{getOwnerVehiclePlateFormatsHint()}</span>
                         </div>
                       </motion.div>
                     )}

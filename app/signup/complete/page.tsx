@@ -7,23 +7,21 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
-import { normalizePhoneNumber, isValidPhoneNumber } from "@/lib/phone";
+import {
+  normalizePhoneNumber,
+  validateRequiredPhoneNumber,
+} from "@/lib/phone";
+import {
+  formatOwnerVehiclePlateInput,
+  getOwnerVehiclePlateFormatsHint,
+  validateOwnerVehiclePlate,
+} from "@/lib/vehiclePlate";
 import 'react-phone-number-input/style.css';
 import PhoneInput from 'react-phone-number-input';
 
 const TOTAL_STEPS = 3;
 const BATCH_OPTIONS = ["ISE", "CSE", "CSE(AI/ML)", "MECHANICAL", "CIVIL", "ECE", "EEE", "OTHER"];
 const YEAR_OPTIONS = ["I Year", "II Year", "III Year", "IV Year"];
-const VEHICLE_PLATE_REGEX = /^[A-Z]{2}-\d{2}-[A-Z]{1,3}-\d{4}$/;
-
-function formatVehicleNumber(value: string) {
-  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11);
-  const match = cleaned.match(/^([A-Z]{0,2})(\d{0,2})([A-Z]{0,3})(\d{0,4})$/);
-
-  if (!match) return "";
-
-  return [match[1], match[2], match[3], match[4]].filter(Boolean).join("-");
-}
 
 function isVehicleAlreadyRegisteredError(error: any) {
   const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
@@ -132,7 +130,7 @@ export default function CompleteProfile() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    const nextValue = name === "vehicleNo" ? formatVehicleNumber(value) : value;
+    const nextValue = name === "vehicleNo" ? formatOwnerVehiclePlateInput(value) : value;
     setFormData(prev => ({ ...prev, [name]: nextValue }));
     if (error) setError("");
   };
@@ -171,9 +169,11 @@ export default function CompleteProfile() {
         setError("USN, batch, and year are required for students.");
         return;
       }
-      const normalizedPhone = normalizePhoneNumber(formData.phone);
-      if (!isValidPhoneNumber(normalizedPhone)) {
-        setError("Please enter a valid full phone number.");
+      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
+        formData.phone
+      );
+      if (phoneError) {
+        setError(phoneError);
         return;
       }
       setFormData((prev) => ({ ...prev, phone: normalizedPhone }));
@@ -206,17 +206,19 @@ export default function CompleteProfile() {
 
   const handleComplete = async (e: React.FormEvent) => {
     e.preventDefault();
-    const normalizedPhone = normalizePhoneNumber(formData.phone);
-    if (!isValidPhoneNumber(normalizedPhone)) {
-      setError("Please enter a valid full phone number.");
+    const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
+      formData.phone
+    );
+    if (phoneError) {
+      setError(phoneError);
       return;
     }
-    if (formData.hasVehicle === "Yes" && !formData.vehicleNo) {
-      setError("Please provide your vehicle number.");
-      return;
-    }
-    if (formData.hasVehicle === "Yes" && !VEHICLE_PLATE_REGEX.test(formData.vehicleNo)) {
-      setError("Use a valid plate format: KA-09-AB-1234.");
+    const vehicleValidation =
+      formData.hasVehicle === "Yes"
+        ? validateOwnerVehiclePlate(formData.vehicleNo, { required: true })
+        : { plate: "", error: "" };
+    if (vehicleValidation.error) {
+      setError(vehicleValidation.error);
       return;
     }
 
@@ -267,7 +269,7 @@ export default function CompleteProfile() {
       hostel_name: normalizedRole === "Hostelite" ? formData.hostelName : null,
       room_no: normalizedRole === "Hostelite" ? formData.roomNo : null,
       has_vehicle: formData.hasVehicle === "Yes",
-      vehicle_no: formData.hasVehicle === "Yes" ? formData.vehicleNo : null,
+      vehicle_no: formData.hasVehicle === "Yes" ? vehicleValidation.plate : null,
       auth_provider: nextAuthProvider,
       email_verified:
         currentProvider === "google"
@@ -506,11 +508,7 @@ export default function CompleteProfile() {
                         </div>
                       </div>
                     </>
-                  ) : (
-                    <div className="text-xs text-text-secondary bg-white/5 p-3 rounded-sm border border-white/10">
-                      Faculty registration selected. USN, batch, and year are not required.
-                    </div>
-                  )}
+                  ) : null}
 
                   <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
@@ -573,11 +571,7 @@ export default function CompleteProfile() {
                         ))}
                       </div>
                     </div>
-                  ) : (
-                    <div className="text-xs text-text-secondary bg-white/5 p-3 rounded-sm border border-white/10">
-                      Faculty registration selected. Campus status is automatically set to Faculty.
-                    </div>
-                  )}
+                  ) : null}
 
                   {formData.userType === "Student" && formData.role === "Hostelite" ? (
                     <div className="flex flex-col gap-4 mt-2">
@@ -669,13 +663,13 @@ export default function CompleteProfile() {
                         <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">License Plate Number</label>
                         <input 
                           type="text" name="vehicleNo" value={formData.vehicleNo} onChange={handleChange} 
-                          placeholder="KA-09-XX-XXXX" 
+                          placeholder="KA-09-AB-1234 or 22-BH-1234-AA" 
                           className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
                           autoFocus
                         />
                         <div className="flex items-center gap-2 mt-2 text-text-secondary bg-white/5 p-3 rounded-sm">
                           <Info className="w-4 h-4 shrink-0" />
-                          <span className="text-xs leading-relaxed">By registering this vehicle, you permit the NIE Sync Parking Patrol system to verify your parking authorization organically.</span>
+                          <span className="text-xs leading-relaxed">{getOwnerVehiclePlateFormatsHint()}</span>
                         </div>
                       </motion.div>
                     )}

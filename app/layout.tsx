@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Rubik } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
+import { SiteFooter } from "@/app/_components/SiteFooter";
+import { ParkingOwnerBanner } from "@/app/_components/ParkingOwnerBanner";
 
 const rubik = Rubik({ subsets: ["latin"] });
 
@@ -19,7 +21,9 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className={rubik.className} suppressHydrationWarning>
         <Navbar />
+        <ParkingOwnerBanner />
         {children}
+        <SiteFooter />
       </body>
     </html>
   );

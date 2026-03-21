@@ -37,3 +37,36 @@ export function isValidPhoneNumber(value: string) {
     return false;
   }
 }
+
+type RequiredPhoneValidationOptions = {
+  requiredMessage?: string;
+  invalidMessage?: string;
+};
+
+export function validateRequiredPhoneNumber(
+  value: string,
+  options: RequiredPhoneValidationOptions = {}
+) {
+  const normalized = normalizePhoneNumber(value);
+
+  if (!normalized) {
+    return {
+      normalizedPhone: "",
+      error:
+        options.requiredMessage ||
+        "Phone number is required. Please enter your phone number.",
+    };
+  }
+
+  if (!isValidPhoneNumber(normalized)) {
+    return {
+      normalizedPhone: normalized,
+      error: options.invalidMessage || "Please enter a valid full phone number.",
+    };
+  }
+
+  return {
+    normalizedPhone: normalized,
+    error: "",
+  };
+}

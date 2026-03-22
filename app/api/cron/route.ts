@@ -4,6 +4,12 @@ import { runParkingEscalation } from "@/lib/parkingEscalation";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function getBearerToken(request: NextRequest) {
+  const raw = String(request.headers.get("authorization") || "");
+  if (!raw.toLowerCase().startsWith("bearer ")) return "";
+  return raw.slice(7).trim();
+}
+
 function resolveAppBaseUrl(request: NextRequest) {
   const configured = String(process.env.NEXT_PUBLIC_APP_URL || "").trim();
   if (configured) {
@@ -12,16 +18,10 @@ function resolveAppBaseUrl(request: NextRequest) {
   return request.nextUrl.origin.replace(/\/$/, "");
 }
 
-function getBearerToken(request: NextRequest) {
-  const raw = String(request.headers.get("authorization") || "");
-  if (!raw.toLowerCase().startsWith("bearer ")) return "";
-  return raw.slice(7).trim();
-}
-
 export async function GET(request: NextRequest) {
+  const expectedSecret = String(process.env.CRON_SECRET || "").trim();
   const querySecret = String(request.nextUrl.searchParams.get("secret") || "").trim();
   const bearerSecret = getBearerToken(request);
-  const expectedSecret = String(process.env.CRON_SECRET || "").trim();
 
   const authorized = Boolean(
     expectedSecret && (querySecret === expectedSecret || bearerSecret === expectedSecret)

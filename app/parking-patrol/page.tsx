@@ -183,7 +183,7 @@ function buildUnmatchedCopyText(report: UnmatchedReportSnapshot) {
   const reportedAtText = new Date(report.reportedAtIso).toLocaleString();
 
   return [
-    "NIE Campus Sync - Unregistered Vehicle Report",
+    "NIE Campus Sync — Unregistered Vehicle Report",
     `Plate: ${report.plate}`,
     `Location: ${report.location}`,
     `Reported at: ${reportedAtText}`,
@@ -361,7 +361,24 @@ function ParkingPatrolPageContent() {
       .channel(`parking-report-stream-${userId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "parking_reports" },
+        {
+          event: "*",
+          schema: "public",
+          table: "parking_reports",
+          filter: `reported_by=eq.${userId}`,
+        },
+        () => {
+          void loadReports(false);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "parking_reports",
+          filter: `matched_owner_id=eq.${userId}`,
+        },
         () => {
           void loadReports(false);
         }

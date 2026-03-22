@@ -43,12 +43,13 @@ Deno.serve(async (request) => {
     Deno.env.get("CRON_SECRET") ||
     edgeCronSecret;
 
-  const targetUrl = `${appBaseUrl}/api/cron/parking-escalate?secret=${encodeURIComponent(appCronSecret)}`;
+  const targetUrl = `${appBaseUrl}/api/cron`;
 
   try {
     const response = await fetch(targetUrl, {
       method: "GET",
       headers: {
+        Authorization: `Bearer ${appCronSecret}`,
         "x-trigger-source": "supabase-edge-proxy",
       },
     });

@@ -83,8 +83,8 @@ export function ParkingOwnerBanner() {
         .eq("matched_owner_id", userId)
         .in("status", ["pending", "chatting", "email_sent"])
         .is("resolved_at", null)
-        .order("created_at", { ascending: true })
-        .limit(5);
+        .order("created_at", { ascending: false })
+        .limit(1);
 
       if (!isMounted) return;
       if (error) {

@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -24,6 +24,7 @@ import {
   validateParkingReportPlate,
 } from "@/lib/vehiclePlate";
 import {
+  ensureParkingEscalationAction,
   ownerImMovingAction,
   reporterMarkUnresolvedAction,
   reporterMarkResolvedAction,
@@ -183,7 +184,7 @@ function buildUnmatchedCopyText(report: UnmatchedReportSnapshot) {
   const reportedAtText = new Date(report.reportedAtIso).toLocaleString();
 
   return [
-    "NIE Campus Sync — Unregistered Vehicle Report",
+    "NIE Campus Sync - Unregistered Vehicle Report",
     `Plate: ${report.plate}`,
     `Location: ${report.location}`,
     `Reported at: ${reportedAtText}`,
@@ -239,6 +240,7 @@ function ParkingPatrolPageContent() {
     {}
   );
   const [clockMs, setClockMs] = useState(() => Date.now());
+  const escalationAttemptByReportRef = useRef<Record<string, number>>({});
 
   const reportIdFromQuery = searchParams.get("report") || "";
 
@@ -433,6 +435,51 @@ function ParkingPatrolPageContent() {
   const unresolvedCountdown = selectedReport?.acknowledged_at
     ? formatFiveMinuteCountdown(selectedReport.acknowledged_at, clockMs)
     : "5:00";
+
+  useEffect(() => {
+    if (!selectedReport || !isLoggedIn) return;
+    if (!["pending", "chatting"].includes(selectedReport.status)) return;
+    if (selectedReport.email_sent_at) return;
+
+    const createdMs = new Date(selectedReport.created_at).getTime();
+    if (!Number.isFinite(createdMs)) return;
+    if (clockMs - createdMs < 2 * 60 * 1000) return;
+
+    const reportId = selectedReport.id;
+    const previousAttempt = escalationAttemptByReportRef.current[reportId] || 0;
+    if (clockMs - previousAttempt < 15000) return;
+    escalationAttemptByReportRef.current[reportId] = clockMs;
+
+    let cancelled = false;
+
+    const ensureEscalation = async () => {
+      const result = await ensureParkingEscalationAction(reportId);
+      if (cancelled) return;
+
+      if (!result.ok) {
+        escalationAttemptByReportRef.current[reportId] = 0;
+        return;
+      }
+
+      if (result.escalated) {
+        await loadReports(false);
+      }
+    };
+
+    void ensureEscalation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    clockMs,
+    isLoggedIn,
+    loadReports,
+    selectedReport?.id,
+    selectedReport?.status,
+    selectedReport?.email_sent_at,
+    selectedReport?.created_at,
+  ]);
 
   const runOcr = async (file: File) => {
     setIsRunningOcr(true);

@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import { createClient as createServerClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { runParkingEscalationForReport } from "@/lib/parkingEscalation";
 import { normalizeParkingReportPlateForSubmission } from "@/lib/vehiclePlate";
 
 const INCIDENT_PHOTOS_BUCKET = "incident-photos";
@@ -236,4 +237,63 @@ export async function revealParkingPhoneAction(
   }
 
   return { ok: true, phone };
+}
+
+export async function ensureParkingEscalationAction(
+  reportId: string
+): Promise<BasicActionResult & { escalated?: boolean }> {
+  const normalizedReportId = String(reportId || "").trim();
+  if (!normalizedReportId) {
+    return { ok: false, error: "Report id is required." };
+  }
+
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return { ok: false, error: "You must be logged in." };
+  }
+
+  const { data: report, error: reportError } = await supabase
+    .from("parking_reports")
+    .select("id, status, created_at, email_sent_at")
+    .eq("id", normalizedReportId)
+    .maybeSingle();
+
+  if (reportError) {
+    return { ok: false, error: reportError.message || "Unable to verify report access." };
+  }
+
+  if (!report?.id) {
+    return { ok: false, error: "Report not found or not accessible." };
+  }
+
+  const status = String(report.status || "");
+  if (!["pending", "chatting"].includes(status)) {
+    return { ok: true, escalated: false };
+  }
+
+  if (report.email_sent_at) {
+    return { ok: true, escalated: false };
+  }
+
+  const createdMs = new Date(String(report.created_at || "")).getTime();
+  if (!Number.isFinite(createdMs) || Date.now() - createdMs < 2 * 60 * 1000) {
+    return { ok: true, escalated: false };
+  }
+
+  const appBaseUrl = String(process.env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/$/, "");
+  if (!appBaseUrl) {
+    return { ok: false, error: "NEXT_PUBLIC_APP_URL is not configured." };
+  }
+
+  const result = await runParkingEscalationForReport(normalizedReportId, appBaseUrl);
+  if (result.error) {
+    return { ok: false, error: result.error };
+  }
+
+  return { ok: true, escalated: result.escalated };
 }

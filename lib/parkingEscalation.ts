@@ -23,6 +23,12 @@ export type ParkingEscalationSummary = {
   failures: Array<{ reportId: string; error: string }>;
 };
 
+export type ParkingSingleEscalationSummary = {
+  reportId: string;
+  escalated: boolean;
+  error?: string;
+};
+
 function getSupabaseAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -59,9 +65,86 @@ function getDueCutoffIso() {
   return new Date(Date.now() - 2 * 60 * 1000).toISOString();
 }
 
+function normalizeBaseUrl(value: string) {
+  return String(value || "").trim().replace(/\/$/, "");
+}
+
+type EscalateRowResult = { escalated: boolean; error?: string };
+
+async function escalateReportRow(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  report: EscalationReportRow,
+  appBaseUrl: string
+): Promise<EscalateRowResult> {
+  try {
+    const owner = getOwnerProfile(report.matched_owner);
+    let ownerEmail = String(owner?.email || "").trim();
+    const ownerName = getOwnerDisplayName(owner);
+
+    if (!ownerEmail && report.matched_owner_id) {
+      const { data: ownerUser, error: ownerUserError } = await supabase.auth.admin.getUserById(
+        report.matched_owner_id
+      );
+      if (!ownerUserError) {
+        ownerEmail = String(ownerUser?.user?.email || "").trim();
+      }
+    }
+
+    if (!ownerEmail) {
+      return { escalated: false, error: "Matched owner email is missing." };
+    }
+
+    const resolveUrl = `${appBaseUrl}/resolve/${report.id}/${report.resolve_token}`;
+    await sendParkingEmail({
+      toEmail: ownerEmail,
+      ownerName,
+      plate: report.license_plate,
+      location: report.location_description,
+      resolveUrl,
+    });
+
+    const { data: updated, error: updateError } = await supabase
+      .from("parking_reports")
+      .update({
+        status: "email_sent",
+        email_sent_at: new Date().toISOString(),
+      })
+      .eq("id", report.id)
+      .in("status", ["pending", "chatting"])
+      .is("email_sent_at", null)
+      .select("id")
+      .maybeSingle();
+
+    if (updateError) {
+      return { escalated: false, error: updateError.message || "Failed to update parking report status." };
+    }
+
+    if (!updated?.id) {
+      return { escalated: false };
+    }
+
+    const { error: messageError } = await supabase.from("parking_report_messages").insert({
+      report_id: report.id,
+      sender_role: "system",
+      message: "No response in 2 minutes. An email has been sent to the vehicle owner.",
+    });
+
+    if (messageError) {
+      return { escalated: false, error: messageError.message || "Failed to insert escalation message." };
+    }
+
+    return { escalated: true };
+  } catch (error) {
+    return {
+      escalated: false,
+      error: error instanceof Error ? error.message : "Unknown escalation error.",
+    };
+  }
+}
+
 export async function runParkingEscalation(appBaseUrl: string): Promise<ParkingEscalationSummary> {
   const supabase = getSupabaseAdminClient();
-  const normalizedBaseUrl = String(appBaseUrl || "").trim().replace(/\/$/, "");
+  const normalizedBaseUrl = normalizeBaseUrl(appBaseUrl);
   if (!normalizedBaseUrl) {
     throw new Error("App base URL is required for parking escalation emails.");
   }
@@ -97,71 +180,79 @@ export async function runParkingEscalation(appBaseUrl: string): Promise<ParkingE
   };
 
   for (const report of (reports || []) as EscalationReportRow[]) {
-    try {
-      const owner = getOwnerProfile(report.matched_owner);
-      let ownerEmail = String(owner?.email || "").trim();
-      const ownerName = getOwnerDisplayName(owner);
-
-      if (!ownerEmail && report.matched_owner_id) {
-        const { data: ownerUser, error: ownerUserError } = await supabase.auth.admin.getUserById(
-          report.matched_owner_id
-        );
-        if (!ownerUserError) {
-          ownerEmail = String(ownerUser?.user?.email || "").trim();
-        }
-      }
-
-      if (!ownerEmail) {
-        throw new Error("Matched owner email is missing.");
-      }
-
-      const resolveUrl = `${normalizedBaseUrl}/resolve/${report.id}/${report.resolve_token}`;
-      await sendParkingEmail({
-        toEmail: ownerEmail,
-        ownerName,
-        plate: report.license_plate,
-        location: report.location_description,
-        resolveUrl,
-      });
-
-      const { data: updated, error: updateError } = await supabase
-        .from("parking_reports")
-        .update({
-          status: "email_sent",
-          email_sent_at: new Date().toISOString(),
-        })
-        .eq("id", report.id)
-        .in("status", ["pending", "chatting"])
-        .is("email_sent_at", null)
-        .select("id")
-        .maybeSingle();
-
-      if (updateError) {
-        throw new Error(updateError.message || "Failed to update parking report status.");
-      }
-
-      if (!updated?.id) {
-        continue;
-      }
-
-      const { error: messageError } = await supabase.from("parking_report_messages").insert({
-        report_id: report.id,
-        sender_role: "system",
-        message: "No response in 2 minutes. An email has been sent to the vehicle owner.",
-      });
-
-      if (messageError) {
-        throw new Error(messageError.message || "Failed to insert escalation message.");
-      }
-
+    const result = await escalateReportRow(supabase, report, normalizedBaseUrl);
+    if (result.escalated) {
       summary.escalated += 1;
-    } catch (error) {
+      continue;
+    }
+
+    if (result.error) {
       summary.failures.push({
         reportId: report.id,
-        error: error instanceof Error ? error.message : "Unknown escalation error.",
+        error: result.error,
       });
     }
   }
 
   return summary;
+}
+
+export async function runParkingEscalationForReport(
+  reportId: string,
+  appBaseUrl: string
+): Promise<ParkingSingleEscalationSummary> {
+  const normalizedReportId = String(reportId || "").trim();
+  if (!normalizedReportId) {
+    return { reportId: "", escalated: false, error: "Report id is required." };
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const normalizedBaseUrl = normalizeBaseUrl(appBaseUrl);
+  if (!normalizedBaseUrl) {
+    return {
+      reportId: normalizedReportId,
+      escalated: false,
+      error: "App base URL is required for parking escalation emails.",
+    };
+  }
+
+  const { data: report, error } = await supabase
+    .from("parking_reports")
+    .select(
+      `
+      id,
+      license_plate,
+      location_description,
+      resolve_token,
+      matched_owner_id,
+      matched_owner:profiles!matched_owner_id (
+        *
+      )
+    `
+    )
+    .eq("id", normalizedReportId)
+    .in("status", ["pending", "chatting"])
+    .is("email_sent_at", null)
+    .lte("created_at", getDueCutoffIso())
+    .not("matched_owner_id", "is", null)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      reportId: normalizedReportId,
+      escalated: false,
+      error: error.message || "Failed to fetch parking report for escalation.",
+    };
+  }
+
+  if (!report) {
+    return { reportId: normalizedReportId, escalated: false };
+  }
+
+  const result = await escalateReportRow(supabase, report as EscalationReportRow, normalizedBaseUrl);
+  return {
+    reportId: normalizedReportId,
+    escalated: result.escalated,
+    error: result.error,
+  };
 }

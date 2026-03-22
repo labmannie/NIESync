@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock3 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 
@@ -41,6 +41,7 @@ export function ParkingOwnerBanner() {
   const [userId, setUserId] = useState("");
   const [reports, setReports] = useState<OwnerReportBannerRow[]>([]);
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [isResolving, setIsResolving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -49,6 +50,21 @@ export function ParkingOwnerBanner() {
     const timer = window.setInterval(() => setCurrentTimeMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  const syncServerClock = useCallback(async () => {
+    const { data, error } = await supabase.rpc("parking_server_now");
+    if (error) return;
+
+    const row = Array.isArray(data) ? data[0] : data;
+    const serverNowValue =
+      row && typeof row === "object" && "server_now" in row
+        ? String((row as { server_now?: string }).server_now || "")
+        : String(row || "");
+    const serverNowMs = new Date(serverNowValue).getTime();
+    if (!Number.isFinite(serverNowMs)) return;
+
+    setServerClockOffsetMs(serverNowMs - Date.now());
+  }, [supabase]);
 
   useEffect(() => {
     let isMounted = true;
@@ -126,7 +142,19 @@ export function ParkingOwnerBanner() {
     };
   }, [supabase, userId]);
 
+  useEffect(() => {
+    if (!userId) return;
+
+    void syncServerClock();
+    const timer = window.setInterval(() => {
+      void syncServerClock();
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [userId, syncServerClock]);
+
   const activeReport = reports[0] || null;
+  const synchronizedNowMs = currentTimeMs + serverClockOffsetMs;
 
   if (!pathname) return null;
   if (pathname.startsWith("/auth") || pathname.startsWith("/resolve")) return null;
@@ -142,9 +170,9 @@ export function ParkingOwnerBanner() {
     activeReport.status === "email_sent";
   const createdAtMs = new Date(activeReport.created_at).getTime();
   const isChatWindowClosed = Number.isFinite(createdAtMs)
-    ? currentTimeMs - createdAtMs >= 2 * 60 * 1000
+    ? synchronizedNowMs - createdAtMs >= 2 * 60 * 1000
     : false;
-  const countdownText = formatCountdown(activeReport.created_at, currentTimeMs);
+  const countdownText = formatCountdown(activeReport.created_at, synchronizedNowMs);
   const stageLabel =
     activeReport.status === "email_sent"
       ? "Chat window closed. Escalation is active."

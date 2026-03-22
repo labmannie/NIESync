@@ -11,6 +11,7 @@ type SendParkingEmailInput = {
 };
 
 let cachedTransporter: nodemailer.Transporter | null = null;
+let cachedFallbackTransporter: nodemailer.Transporter | null = null;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -20,21 +21,101 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function getTransporter() {
-  if (cachedTransporter) return cachedTransporter;
+type TransportPlan = {
+  user: string;
+  primary: Record<string, unknown>;
+  fallback?: Record<string, unknown>;
+};
 
-  const gmailUser = requireEnv("GMAIL_USER");
-  const gmailAppPassword = requireEnv("GMAIL_APP_PASSWORD");
+function getZohoSmtpHost(emailDomain: string) {
+  if (emailDomain.endsWith(".in")) {
+    return "smtp.zoho.in";
+  }
+  return "smtp.zoho.com";
+}
 
-  cachedTransporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: gmailUser,
-      pass: gmailAppPassword,
+function resolveTransportPlan(): TransportPlan {
+  const smtpUser = requireEnv("GMAIL_USER").trim();
+  const smtpPassword = requireEnv("GMAIL_APP_PASSWORD").trim();
+  const emailDomain = smtpUser.split("@")[1]?.toLowerCase() || "";
+
+  if (emailDomain === "gmail.com" || emailDomain === "googlemail.com") {
+    return {
+      user: smtpUser,
+      primary: {
+        service: "gmail",
+        auth: {
+          user: smtpUser,
+          pass: smtpPassword,
+        },
+      },
+    };
+  }
+
+  if (
+    emailDomain === "zoho.com" ||
+    emailDomain === "zohomail.com" ||
+    emailDomain === "zoho.in" ||
+    emailDomain === "zohomail.in"
+  ) {
+    const primaryHost = getZohoSmtpHost(emailDomain);
+    const fallbackHost = primaryHost === "smtp.zoho.in" ? "smtp.zoho.com" : "smtp.zoho.in";
+
+    return {
+      user: smtpUser,
+      primary: {
+        host: primaryHost,
+        port: 465,
+        secure: true,
+        auth: {
+          user: smtpUser,
+          pass: smtpPassword,
+        },
+      },
+      fallback: {
+        host: fallbackHost,
+        port: 465,
+        secure: true,
+        auth: {
+          user: smtpUser,
+          pass: smtpPassword,
+        },
+      },
+    };
+  }
+
+  return {
+    user: smtpUser,
+    primary: {
+      host: `smtp.${emailDomain}`,
+      port: 465,
+      secure: true,
+      auth: {
+        user: smtpUser,
+        pass: smtpPassword,
+      },
     },
-  });
+  };
+}
 
-  return cachedTransporter;
+function getTransporters() {
+  const plan = resolveTransportPlan();
+
+  if (!cachedTransporter) {
+    cachedTransporter = nodemailer.createTransport(plan.primary as any);
+  }
+
+  if (plan.fallback && !cachedFallbackTransporter) {
+    cachedFallbackTransporter = nodemailer.createTransport(plan.fallback as any);
+  }
+
+  const fallbackTransporter = plan.fallback ? cachedFallbackTransporter : null;
+
+  return {
+    user: plan.user,
+    primary: cachedTransporter,
+    fallback: fallbackTransporter,
+  };
 }
 
 function escapeHtml(value: string) {
@@ -74,7 +155,9 @@ export async function sendParkingEmail({
     : `<div style="display:inline-block;width:56px;height:56px;line-height:56px;text-align:center;border-radius:12px;background:#111111;color:#FFB000;font-size:11px;font-weight:900;letter-spacing:.08em;">NIE</div>`;
 
   const subject = "NIE Sync | Parking Report Action Required";
-  const from = process.env.PARKING_FROM_EMAIL || `NIE Campus Sync <${requireEnv("GMAIL_USER")}>`;
+  const { user: smtpUser, primary, fallback } = getTransporters();
+  const preferredFrom = process.env.PARKING_FROM_EMAIL || `NIE Campus Sync <${smtpUser}>`;
+  const authenticatedFrom = `NIE Campus Sync <${smtpUser}>`;
 
   const html = `
     <!doctype html>
@@ -190,12 +273,53 @@ export async function sendParkingEmail({
     "Copyright 2026 NIE Sync. All rights reserved.",
   ].join("\n");
 
-  await getTransporter().sendMail({
-    from,
-    to: toEmail,
-    subject,
-    html,
-    text,
-    attachments: logoAttachment ? [logoAttachment] : [],
-  });
+  const attachments = logoAttachment ? [logoAttachment] : [];
+  let lastError: unknown = null;
+
+  const sendUsingTransporter = async (transporter: nodemailer.Transporter) => {
+    try {
+      await transporter.sendMail({
+        from: preferredFrom,
+        to: toEmail,
+        subject,
+        html,
+        text,
+        attachments,
+      });
+      return true;
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (preferredFrom !== authenticatedFrom) {
+      try {
+        await transporter.sendMail({
+          from: authenticatedFrom,
+          to: toEmail,
+          subject,
+          html,
+          text,
+          attachments,
+        });
+        return true;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    return false;
+  };
+
+  const sentWithPrimary = await sendUsingTransporter(primary);
+  if (sentWithPrimary) return;
+
+  if (fallback && fallback !== primary) {
+    const sentWithFallback = await sendUsingTransporter(fallback);
+    if (sentWithFallback) return;
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error("Unable to deliver parking escalation email.");
 }

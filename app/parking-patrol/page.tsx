@@ -240,6 +240,7 @@ function ParkingPatrolPageContent() {
     {}
   );
   const [clockMs, setClockMs] = useState(() => Date.now());
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const escalationAttemptByReportRef = useRef<Record<string, number>>({});
 
   const reportIdFromQuery = searchParams.get("report") || "";
@@ -315,10 +316,36 @@ function ParkingPatrolPageContent() {
     [supabase]
   );
 
+  const syncServerClock = useCallback(async () => {
+    const { data, error } = await supabase.rpc("parking_server_now");
+    if (error) return;
+
+    const row = Array.isArray(data) ? data[0] : data;
+    const serverNowValue =
+      row && typeof row === "object" && "server_now" in row
+        ? String((row as { server_now?: string }).server_now || "")
+        : String(row || "");
+    const serverNowMs = new Date(serverNowValue).getTime();
+    if (!Number.isFinite(serverNowMs)) return;
+
+    setServerClockOffsetMs(serverNowMs - Date.now());
+  }, [supabase]);
+
   useEffect(() => {
     const timer = window.setInterval(() => setClockMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    void syncServerClock();
+    const timer = window.setInterval(() => {
+      void syncServerClock();
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [isLoggedIn, syncServerClock]);
 
   useEffect(() => {
     return () => {
@@ -417,9 +444,10 @@ function ParkingPatrolPageContent() {
   }, [supabase, selectedReportId, loadMessages]);
 
   const selectedReport = reports.find((report) => report.id === selectedReportId) || null;
+  const synchronizedNowMs = clockMs + serverClockOffsetMs;
   const isReporter = selectedReport?.reported_by === userId;
   const isOwner = selectedReport?.matched_owner_id === userId;
-  const chatWindowOpen = isChatWindowOpen(selectedReport, clockMs);
+  const chatWindowOpen = isChatWindowOpen(selectedReport, synchronizedNowMs);
   const isChatReadOnly = Boolean(
     !selectedReport ||
       selectedReport.status === "unmatched" ||
@@ -429,11 +457,11 @@ function ParkingPatrolPageContent() {
 
   const canOwnerAcknowledge = canOwnerAcknowledgeReport(selectedReport, userId);
   const canReporterResolve = canReporterResolveReport(selectedReport, userId);
-  const canMarkUnresolved = canReporterMarkUnresolved(selectedReport, userId, clockMs);
-  const canCallOwner = canReporterRevealOwnerPhone(selectedReport, userId, clockMs);
+  const canMarkUnresolved = canReporterMarkUnresolved(selectedReport, userId, synchronizedNowMs);
+  const canCallOwner = canReporterRevealOwnerPhone(selectedReport, userId, synchronizedNowMs);
   const ownerPhone = selectedReport ? revealedPhoneByReport[selectedReport.id] || "" : "";
   const unresolvedCountdown = selectedReport?.acknowledged_at
-    ? formatFiveMinuteCountdown(selectedReport.acknowledged_at, clockMs)
+    ? formatFiveMinuteCountdown(selectedReport.acknowledged_at, synchronizedNowMs)
     : "5:00";
 
   useEffect(() => {
@@ -443,7 +471,7 @@ function ParkingPatrolPageContent() {
 
     const createdMs = new Date(selectedReport.created_at).getTime();
     if (!Number.isFinite(createdMs)) return;
-    if (clockMs - createdMs < 2 * 60 * 1000) return;
+    if (synchronizedNowMs - createdMs < 2 * 60 * 1000) return;
 
     const reportId = selectedReport.id;
     const previousAttempt = escalationAttemptByReportRef.current[reportId] || 0;
@@ -475,6 +503,7 @@ function ParkingPatrolPageContent() {
     clockMs,
     isLoggedIn,
     loadReports,
+    synchronizedNowMs,
     selectedReport?.id,
     selectedReport?.status,
     selectedReport?.email_sent_at,
@@ -1001,7 +1030,7 @@ function ParkingPatrolPageContent() {
                         selectedReport.status === "chatting") && (
                         <span className="inline-flex items-center gap-1 rounded-full border border-white/15 px-3 py-1 text-[11px] text-text-secondary">
                           <Clock3 className="h-3.5 w-3.5" />
-                          {formatTwoMinuteCountdown(selectedReport.created_at, clockMs)}
+                          {formatTwoMinuteCountdown(selectedReport.created_at, synchronizedNowMs)}
                         </span>
                       )}
                       <span

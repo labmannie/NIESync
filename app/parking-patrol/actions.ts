@@ -285,7 +285,13 @@ export async function ensureParkingEscalationAction(
     return { ok: true, escalated: false };
   }
 
-  const appBaseUrl = String(process.env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/$/, "");
+  const rawBaseUrl = String(process.env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/$/, "");
+  const appBaseUrl =
+    rawBaseUrl.startsWith("http://") &&
+    !rawBaseUrl.includes("localhost") &&
+    !rawBaseUrl.includes("127.0.0.1")
+      ? `https://${rawBaseUrl.slice("http://".length)}`
+      : rawBaseUrl;
   if (!appBaseUrl) {
     return { ok: false, error: "NEXT_PUBLIC_APP_URL is not configured." };
   }

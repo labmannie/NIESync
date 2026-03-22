@@ -66,7 +66,18 @@ function getDueCutoffIso() {
 }
 
 function normalizeBaseUrl(value: string) {
-  return String(value || "").trim().replace(/\/$/, "");
+  const trimmed = String(value || "").trim().replace(/\/$/, "");
+  if (!trimmed) return "";
+
+  if (
+    trimmed.startsWith("http://") &&
+    !trimmed.includes("localhost") &&
+    !trimmed.includes("127.0.0.1")
+  ) {
+    return `https://${trimmed.slice("http://".length)}`;
+  }
+
+  return trimmed;
 }
 
 type EscalateRowResult = { escalated: boolean; error?: string };

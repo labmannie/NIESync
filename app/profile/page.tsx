@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ArrowRight, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle } from "lucide-react";
+import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ArrowRight, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle, ShieldAlert } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -102,6 +102,14 @@ type SessionDeviceRow = {
   revoked_at: string | null;
 };
 
+type ParkingReportSummary = {
+  total: number;
+  active: number;
+  resolved: number;
+  asReporter: number;
+  asOwner: number;
+};
+
 function extractSessionIdFromJwt(accessToken?: string | null) {
   if (!accessToken) return "";
 
@@ -144,7 +152,7 @@ function isWithinLast24Hours(timestamp?: string | null) {
 
 export default function ProfilePage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -169,6 +177,14 @@ export default function ProfilePage() {
   const [isSessionsLoading, setIsSessionsLoading] = useState(false);
   const [sessionActionId, setSessionActionId] = useState("");
   const [isSigningOutOthers, setIsSigningOutOthers] = useState(false);
+  const [parkingReportSummary, setParkingReportSummary] = useState<ParkingReportSummary>({
+    total: 0,
+    active: 0,
+    resolved: 0,
+    asReporter: 0,
+    asOwner: 0,
+  });
+  const [isParkingSummaryLoading, setIsParkingSummaryLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -245,6 +261,71 @@ export default function ProfilePage() {
     }
   };
 
+  const loadParkingReportSummary = useCallback(async (userId: string) => {
+    setIsParkingSummaryLoading(true);
+    try {
+      const { data, error: reportsError } = await supabase
+        .from("parking_reports")
+        .select("id, status, reported_by, matched_owner_id")
+        .limit(200);
+
+      if (reportsError) {
+        if (reportsError.code === "42P01") {
+          setParkingReportSummary({
+            total: 0,
+            active: 0,
+            resolved: 0,
+            asReporter: 0,
+            asOwner: 0,
+          });
+          return;
+        }
+        throw reportsError;
+      }
+
+      const rows = (data || []) as Array<{
+        id: string;
+        status: string;
+        reported_by: string | null;
+        matched_owner_id: string | null;
+      }>;
+      const activeStatuses = new Set(["pending", "chatting", "acknowledged", "email_sent"]);
+      const nextSummary: ParkingReportSummary = {
+        total: rows.length,
+        active: rows.filter((row) => activeStatuses.has(String(row.status || ""))).length,
+        resolved: rows.filter((row) => String(row.status || "") === "resolved").length,
+        asReporter: rows.filter((row) => row.reported_by === userId).length,
+        asOwner: rows.filter((row) => row.matched_owner_id === userId).length,
+      };
+
+      setParkingReportSummary(nextSummary);
+    } catch (reportsError: any) {
+      console.error("Error loading parking reports:", reportsError?.message || reportsError);
+    } finally {
+      setIsParkingSummaryLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    const userId = String(authUser?.id || "");
+    if (!userId) return;
+
+    const channel = supabase
+      .channel(`profile-parking-summary-${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "parking_reports" },
+        () => {
+          void loadParkingReportSummary(userId);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [authUser?.id, supabase, loadParkingReportSummary]);
+
   const fetchProfile = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -285,6 +366,7 @@ export default function ProfilePage() {
 
       setAdditionalVehicles(extraVehicles || []);
       await loadSessions(user.id, resolvedSessionId);
+      await loadParkingReportSummary(user.id);
     } catch (error: any) {
       console.error("Error fetching profile:", error.message);
     } finally {
@@ -1740,10 +1822,10 @@ export default function ProfilePage() {
             {/* View Mode Identity Specifics */}
             <div className="mt-7 mb-3">
               <h2 className="text-xs font-black uppercase tracking-[0.22em] text-text-secondary">
-                Residency and Vehicles
+                Residency, Vehicles and Parking History
               </h2>
             </div>
-            <div className="grid md:grid-cols-2 gap-6 mt-6">
+            <div className="grid gap-6 mt-6 md:grid-cols-2 lg:grid-cols-3">
               <div className="glass-card p-6 rounded-sm border border-white/10 relative">
                 <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary flex items-center gap-2 mb-6">
                   <MapPin className="w-4 h-4" /> Registered Residency Base
@@ -1825,6 +1907,45 @@ export default function ProfilePage() {
                   <div className="flex flex-col items-center justify-center text-center h-[150px] gap-2 p-6 border border-dashed border-white/10 rounded-sm">
                     <Car className="w-6 h-6 text-white/20" />
                     <span className="text-sm text-text-secondary">No registered vehicles matching this identity trace.</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="glass-card p-6 rounded-sm border border-white/10 relative">
+                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary flex items-center gap-2 mb-6">
+                  <ShieldAlert className="w-4 h-4" /> Parking Reports
+                </h3>
+                {isParkingSummaryLoading ? (
+                  <div className="flex items-center justify-center py-14">
+                    <Loader2 className="w-5 h-5 animate-spin text-white/50" />
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-sm border border-white/10 bg-black/35 p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Resolved</p>
+                        <p className="mt-1 text-xl font-black text-white">{parkingReportSummary.resolved}</p>
+                      </div>
+                      <div className="rounded-sm border border-white/10 bg-black/35 p-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Total</p>
+                        <p className="mt-1 text-xl font-black text-white">{parkingReportSummary.total}</p>
+                      </div>
+                    </div>
+                    <div className="rounded-sm border border-white/10 bg-black/35 p-3 text-xs text-white/70">
+                      Reporter side: {parkingReportSummary.asReporter}
+                      <br />
+                      Owner side: {parkingReportSummary.asOwner}
+                    </div>
+                    <p className="text-xs text-text-secondary">
+                      Live report actions stay in Parking Patrol. Profile Reports stores only finished history.
+                    </p>
+                    <Link
+                      href="/profile/reports"
+                      className="inline-flex w-full items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors"
+                    >
+                      Open Resolved Reports
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
                   </div>
                 )}
               </div>

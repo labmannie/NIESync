@@ -1,12 +1,14 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Camera,
   CheckCircle2,
   Clock3,
+  Copy,
   Download,
   Loader2,
   PhoneCall,
@@ -23,20 +25,20 @@ import {
 } from "@/lib/vehiclePlate";
 import {
   ownerImMovingAction,
+  reporterMarkUnresolvedAction,
   reporterMarkResolvedAction,
   revealParkingPhoneAction,
   sendParkingMessageAction,
   submitParkingReportAction,
-} from "./actions";
-
-type ParkingStatus =
-  | "pending"
-  | "chatting"
-  | "acknowledged"
-  | "email_sent"
-  | "resolved"
-  | "unmatched"
-  | "expired";
+} from "@/app/parking-patrol/actions";
+import {
+  canOwnerAcknowledgeReport,
+  canReporterMarkUnresolved,
+  canReporterResolveReport,
+  canReporterRevealOwnerPhone,
+  isChatWindowOpen,
+  type ParkingStatus,
+} from "@/lib/parkingReportPermissions";
 
 type ParkingReportRow = {
   id: string;
@@ -48,6 +50,7 @@ type ParkingReportRow = {
   status: ParkingStatus;
   phone_revealed: boolean;
   email_sent_at: string | null;
+  acknowledged_at: string | null;
   resolved_at: string | null;
   created_at: string;
   photo_url: string | null;
@@ -61,6 +64,13 @@ type ParkingMessageRow = {
   sender_role: "reporter" | "owner" | "system";
   message: string;
   created_at: string;
+};
+
+type UnmatchedReportSnapshot = {
+  reportId: string;
+  plate: string;
+  location: string;
+  reportedAtIso: string;
 };
 
 type TesseractRecognizer = {
@@ -117,9 +127,7 @@ function loadTesseractRecognizer() {
         if (window.Tesseract) resolve(window.Tesseract);
         else reject(new Error("Tesseract loaded but not initialized."));
       });
-      existing.addEventListener("error", () => {
-        reject(new Error("Unable to load OCR engine."));
-      });
+      existing.addEventListener("error", () => reject(new Error("Unable to load OCR engine.")));
       return;
     }
 
@@ -160,12 +168,28 @@ function formatTwoMinuteCountdown(createdAt: string, nowMs: number) {
   return `${mm}:${String(ss).padStart(2, "0")}`;
 }
 
-function isChatWindowOpen(report: ParkingReportRow | null, nowMs: number) {
-  if (!report) return false;
-  if (!["pending", "chatting"].includes(report.status)) return false;
-  const createdMs = new Date(report.created_at).getTime();
-  if (Number.isNaN(createdMs)) return false;
-  return nowMs - createdMs < 2 * 60 * 1000;
+function formatFiveMinuteCountdown(startedAt: string, nowMs: number) {
+  const startedMs = new Date(startedAt).getTime();
+  if (Number.isNaN(startedMs)) return "5:00";
+  const elapsed = Math.floor((nowMs - startedMs) / 1000);
+  const remaining = Math.max(0, 300 - elapsed);
+  const mm = Math.floor(remaining / 60);
+  const ss = remaining % 60;
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+
+function buildUnmatchedCopyText(report: UnmatchedReportSnapshot) {
+  const shortId = (String(report.reportId || "").slice(0, 8).toUpperCase() || "UNKNOWN");
+  const reportedAtText = new Date(report.reportedAtIso).toLocaleString();
+
+  return [
+    "NIE Campus Sync - Unregistered Vehicle Report",
+    `Plate: ${report.plate}`,
+    `Location: ${report.location}`,
+    `Reported at: ${reportedAtText}`,
+    `Report ID: #${shortId}`,
+    "This vehicle is not registered. Please contact campus security or place a physical notice on the vehicle.",
+  ].join("\n");
 }
 
 function getThreadRoleLabel(
@@ -184,6 +208,7 @@ function ParkingPatrolPageContent() {
   const searchParams = useSearchParams();
 
   const [userId, setUserId] = useState("");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoadingReports, setIsLoadingReports] = useState(true);
   const [reports, setReports] = useState<ParkingReportRow[]>([]);
   const [selectedReportId, setSelectedReportId] = useState("");
@@ -194,12 +219,13 @@ function ParkingPatrolPageContent() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState("");
   const [ocrRawText, setOcrRawText] = useState("");
-  const [ocrProgress, setOcrProgress] = useState(0);
   const [isRunningOcr, setIsRunningOcr] = useState(false);
   const [plateInput, setPlateInput] = useState("");
   const [locationInput, setLocationInput] = useState("");
   const [submitMessage, setSubmitMessage] = useState("");
   const [submitError, setSubmitError] = useState("");
+  const [copyDetailsMessage, setCopyDetailsMessage] = useState("");
+  const [unmatchedReport, setUnmatchedReport] = useState<UnmatchedReportSnapshot | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [threadDraft, setThreadDraft] = useState("");
@@ -207,6 +233,7 @@ function ParkingPatrolPageContent() {
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
+  const [isMarkingUnresolved, setIsMarkingUnresolved] = useState(false);
   const [isCallingOwner, setIsCallingOwner] = useState(false);
   const [revealedPhoneByReport, setRevealedPhoneByReport] = useState<Record<string, string>>(
     {}
@@ -215,17 +242,19 @@ function ParkingPatrolPageContent() {
 
   const reportIdFromQuery = searchParams.get("report") || "";
 
-  const loadReports = useCallback(async () => {
-    setIsLoadingReports(true);
-    setSchemaError("");
+  const loadReports = useCallback(async (showLoader = false) => {
+    if (showLoader) {
+      setIsLoadingReports(true);
+    }
 
     const { data, error } = await supabase
       .from("parking_reports")
       .select(
-        "id, reported_by, license_plate, plate_normalized, location_description, matched_owner_id, status, phone_revealed, email_sent_at, resolved_at, created_at, photo_url, ocr_raw_text"
+        "id, reported_by, license_plate, plate_normalized, location_description, matched_owner_id, status, phone_revealed, email_sent_at, acknowledged_at, resolved_at, created_at, photo_url, ocr_raw_text"
       )
+      .in("status", ["pending", "chatting", "acknowledged", "email_sent"])
       .order("created_at", { ascending: false })
-      .limit(60);
+      .limit(80);
 
     if (error) {
       if (error.code === "42P01") {
@@ -236,10 +265,13 @@ function ParkingPatrolPageContent() {
         setSchemaError(error.message || "Unable to load reports.");
       }
       setReports([]);
-      setIsLoadingReports(false);
+      if (showLoader) {
+        setIsLoadingReports(false);
+      }
       return;
     }
 
+    setSchemaError("");
     const rows = (data || []) as ParkingReportRow[];
     setReports(rows);
     setSelectedReportId((current) => {
@@ -250,7 +282,9 @@ function ParkingPatrolPageContent() {
       return rows[0]?.id || "";
     });
 
-    setIsLoadingReports(false);
+    if (showLoader) {
+      setIsLoadingReports(false);
+    }
   }, [supabase, reportIdFromQuery]);
 
   const loadMessages = useCallback(
@@ -285,6 +319,14 @@ function ParkingPatrolPageContent() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      if (photoPreview) {
+        URL.revokeObjectURL(photoPreview);
+      }
+    };
+  }, [photoPreview]);
+
+  useEffect(() => {
     let active = true;
 
     const bootstrap = async () => {
@@ -294,10 +336,11 @@ function ParkingPatrolPageContent() {
 
       if (!active) return;
       setUserId(user?.id || "");
-      await loadReports();
+      setIsLoggedIn(Boolean(user?.id));
+      await loadReports(true);
     };
 
-    bootstrap();
+    void bootstrap();
     return () => {
       active = false;
     };
@@ -308,7 +351,7 @@ function ParkingPatrolPageContent() {
       setMessages([]);
       return;
     }
-    loadMessages(selectedReportId);
+    void loadMessages(selectedReportId);
   }, [selectedReportId, loadMessages]);
 
   useEffect(() => {
@@ -320,7 +363,7 @@ function ParkingPatrolPageContent() {
         "postgres_changes",
         { event: "*", schema: "public", table: "parking_reports" },
         () => {
-          loadReports();
+          void loadReports(false);
         }
       )
       .subscribe();
@@ -334,7 +377,7 @@ function ParkingPatrolPageContent() {
     if (!selectedReportId) return;
 
     const messageChannel = supabase
-      .channel(`parking-message-stream-${selectedReportId}`)
+      .channel(`parking-report-messages-${selectedReportId}`)
       .on(
         "postgres_changes",
         {
@@ -344,7 +387,7 @@ function ParkingPatrolPageContent() {
           filter: `report_id=eq.${selectedReportId}`,
         },
         () => {
-          loadMessages(selectedReportId);
+          void loadMessages(selectedReportId);
         }
       )
       .subscribe();
@@ -357,47 +400,31 @@ function ParkingPatrolPageContent() {
   const selectedReport = reports.find((report) => report.id === selectedReportId) || null;
   const isReporter = selectedReport?.reported_by === userId;
   const isOwner = selectedReport?.matched_owner_id === userId;
-  const isUnmatchedReport = selectedReport?.status === "unmatched";
   const chatWindowOpen = isChatWindowOpen(selectedReport, clockMs);
   const isChatReadOnly = Boolean(
     !selectedReport ||
-      isUnmatchedReport ||
+      selectedReport.status === "unmatched" ||
       selectedReport.status === "resolved" ||
       !chatWindowOpen
   );
 
-  const canOwnerAcknowledge = Boolean(
-    selectedReport &&
-      isOwner &&
-      ["pending", "chatting", "email_sent"].includes(selectedReport.status)
-  );
-  const canReporterResolve = Boolean(
-    selectedReport && isReporter && selectedReport.status === "acknowledged"
-  );
-  const canCallOwner = Boolean(
-    selectedReport &&
-      isReporter &&
-      selectedReport.status === "email_sent" &&
-      Date.now() - new Date(selectedReport.created_at).getTime() >= 5 * 60 * 1000
-  );
+  const canOwnerAcknowledge = canOwnerAcknowledgeReport(selectedReport, userId);
+  const canReporterResolve = canReporterResolveReport(selectedReport, userId);
+  const canMarkUnresolved = canReporterMarkUnresolved(selectedReport, userId, clockMs);
+  const canCallOwner = canReporterRevealOwnerPhone(selectedReport, userId, clockMs);
   const ownerPhone = selectedReport ? revealedPhoneByReport[selectedReport.id] || "" : "";
+  const unresolvedCountdown = selectedReport?.acknowledged_at
+    ? formatFiveMinuteCountdown(selectedReport.acknowledged_at, clockMs)
+    : "5:00";
 
   const runOcr = async (file: File) => {
     setIsRunningOcr(true);
-    setOcrProgress(0);
     setSubmitError("");
     setSubmitMessage("");
 
     try {
       const recognizer = await loadTesseractRecognizer();
-      const result = await recognizer.recognize(file, "eng", {
-        logger: (message) => {
-          const progressValue = Number(message.progress || 0);
-          if (Number.isFinite(progressValue)) {
-            setOcrProgress(Math.max(0, Math.min(100, Math.round(progressValue * 100))));
-          }
-        },
-      });
+      const result = await recognizer.recognize(file, "eng");
 
       const extractedText = String(result?.data?.text || "").trim();
       setOcrRawText(extractedText);
@@ -410,12 +437,9 @@ function ParkingPatrolPageContent() {
       const plateToApply = normalized.plate || fallbackFormatted;
       if (plateToApply) {
         setPlateInput(plateToApply);
-      }
-
-      if (!plateToApply) {
-        setSubmitError("OCR ran successfully, but could not detect a clear plate. Please edit manually.");
+        setSubmitMessage("Plate extracted from photo. You can edit it before submitting.");
       } else {
-        setSubmitMessage("OCR completed. Review and edit the extracted plate if needed.");
+        setSubmitError("Could not detect a clear plate from the image. Please enter it manually.");
       }
     } catch (error) {
       setSubmitError(
@@ -444,10 +468,14 @@ function ParkingPatrolPageContent() {
   const handleSubmitReport = async () => {
     setSubmitError("");
     setSubmitMessage("");
+    setCopyDetailsMessage("");
+    setUnmatchedReport(null);
     setThreadActionError("");
 
-    if (!locationInput.trim()) {
-      setSubmitError("Please provide a location description.");
+    const locationValue = locationInput.trim();
+
+    if (!locationValue) {
+      setSubmitError("Please describe where the vehicle is blocking movement.");
       return;
     }
 
@@ -459,10 +487,8 @@ function ParkingPatrolPageContent() {
 
     setIsSubmitting(true);
     const payload = new FormData();
-    if (photoFile) {
-      payload.append("photo", photoFile);
-    }
-    payload.append("location_description", locationInput.trim());
+    if (photoFile) payload.append("photo", photoFile);
+    payload.append("location_description", locationValue);
     payload.append("plate_input", plateInput.trim());
     payload.append("ocr_raw_text", ocrRawText.trim());
 
@@ -474,26 +500,49 @@ function ParkingPatrolPageContent() {
       return;
     }
 
-    setSubmitMessage(
-      result.unmatched
-        ? "This vehicle is not registered in NIE Campus Sync. Your report has been logged."
-        : "Report submitted. Owner has been notified through in-app channel."
-    );
+    if (result.unmatched) {
+      const finalPlate = String(result.plate || plateValidation.plate || plateInput || "")
+        .trim()
+        .toUpperCase();
+      setSubmitMessage(
+        `Vehicle ${finalPlate} is not registered in NIE Campus Sync.\nYour report has been logged. Please handle this physically.`
+      );
+      setUnmatchedReport({
+        reportId: String(result.reportId || ""),
+        plate: finalPlate,
+        location: locationValue,
+        reportedAtIso: new Date().toISOString(),
+      });
+    } else {
+      setSubmitMessage("Report submitted successfully. The vehicle owner has been notified.");
+      setUnmatchedReport(null);
+    }
 
     setPlateInput("");
     setLocationInput("");
     setOcrRawText("");
-    setOcrProgress(0);
-    if (photoPreview) {
-      URL.revokeObjectURL(photoPreview);
-    }
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoFile(null);
     setPhotoPreview("");
     setReportPanelOpen(false);
 
     await loadReports();
-    if (result.reportId) {
+    if (result.reportId && !result.unmatched) {
       setSelectedReportId(result.reportId);
+    } else {
+      setSelectedReportId("");
+    }
+  };
+
+  const handleCopyUnmatchedDetails = async () => {
+    if (!unmatchedReport) return;
+
+    try {
+      const text = buildUnmatchedCopyText(unmatchedReport);
+      await navigator.clipboard.writeText(text);
+      setCopyDetailsMessage("Report details copied.");
+    } catch {
+      setCopyDetailsMessage("Clipboard is unavailable. Please copy manually.");
     }
   };
 
@@ -503,9 +552,9 @@ function ParkingPatrolPageContent() {
       setThreadActionError("Chat window is closed for this report.");
       return;
     }
+
     setIsSendingMessage(true);
     setThreadActionError("");
-
     const response = await sendParkingMessageAction(selectedReport.id, threadDraft.trim());
     setIsSendingMessage(false);
 
@@ -553,6 +602,23 @@ function ParkingPatrolPageContent() {
     await loadMessages(selectedReport.id);
   };
 
+  const handleReporterMarkUnresolved = async () => {
+    if (!selectedReport) return;
+    setIsMarkingUnresolved(true);
+    setThreadActionError("");
+
+    const result = await reporterMarkUnresolvedAction(selectedReport.id);
+    setIsMarkingUnresolved(false);
+
+    if (!result.ok) {
+      setThreadActionError(result.error || "Unable to mark unresolved.");
+      return;
+    }
+
+    await loadReports();
+    await loadMessages(selectedReport.id);
+  };
+
   const handleRevealAndCall = async () => {
     if (!selectedReport) return;
     setIsCallingOwner(true);
@@ -586,7 +652,7 @@ function ParkingPatrolPageContent() {
     const header = [
       `Report ID: ${selectedReport.id}`,
       `Plate: ${selectedReport.license_plate}`,
-      `Location: ${selectedReport.location_description}`,
+      `Reporter Note: ${selectedReport.location_description}`,
       `Status: ${selectedReport.status}`,
       `Created: ${new Date(selectedReport.created_at).toLocaleString()}`,
       "",
@@ -615,22 +681,29 @@ function ParkingPatrolPageContent() {
   };
 
   return (
-    <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-36 text-white selection:bg-accent-amber/30 md:px-8">
+    <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
       <div className="mx-auto w-full max-w-7xl">
-        <header className="mb-8 rounded-3xl border border-white/10 bg-white/[0.03] px-6 py-7 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:px-8">
+        <header className="mb-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <h1 className="text-3xl font-black uppercase tracking-tight md:text-4xl">
-                Parking <span className="text-accent-amber">Patrol</span>
+              <h1 className="mt-1 text-2xl font-black tracking-tight md:text-4xl">
+                Parking Patrol
               </h1>
               <p className="mt-2 max-w-3xl text-sm text-text-secondary md:text-base">
-                Report blocking vehicles, communicate quickly in a private incident thread, and resolve safely with
-                guided escalation.
+                Live reporting and live chat operations for parking incidents.
               </p>
             </div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-text-secondary">
-              <RadioTower className="h-4 w-4 text-accent-amber" />
-              Live Incident Channel
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
+                <RadioTower className="h-4 w-4 text-accent-amber" />
+                Live Incident Channel
+              </div>
+              <Link
+                href="/profile/reports"
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20"
+              >
+                History Archive
+              </Link>
             </div>
           </div>
         </header>
@@ -641,30 +714,61 @@ function ParkingPatrolPageContent() {
           </div>
         ) : null}
 
-        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <section className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <section className="space-y-6">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 md:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
+                  Live Incident
+                </h2>
+                <p className="mt-1 text-sm text-text-secondary">
+                  One live report thread at a time. Unmatched and finished reports stay in profile history.
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/30 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-white/80">
+                {isLoadingReports ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                {reports.length} Active
+              </span>
+            </div>
+            {selectedReport ? (
+              <div className="mt-3 rounded-xl border border-white/10 bg-black/30 px-3 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-mono text-sm font-bold tracking-wider">{selectedReport.license_plate}</p>
+                  <span className="text-[11px] text-white/60">{formatElapsed(selectedReport.created_at)}</span>
+                </div>
+                <p className="mt-1 line-clamp-2 text-xs text-text-secondary">
+                  {selectedReport.location_description}
+                </p>
+              </div>
+            ) : null}
+          </div>
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-sm font-black uppercase tracking-[0.2em] text-text-secondary">
                     Report Blocking Vehicle
                   </h2>
                   <p className="mt-2 text-sm text-text-secondary">
-                    Add vehicle number directly, or upload a photo to auto-fill and edit before submission.
+                    Enter plate, optionally upload photo for extraction, and submit.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setReportPanelOpen((current) => !current)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-accent-amber/40 bg-accent-amber/20 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-accent-amber transition-colors hover:bg-accent-amber/30"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-accent-amber bg-accent-amber px-5 py-3 text-sm font-black uppercase tracking-[0.16em] text-campus-black shadow-[0_8px_24px_rgba(231,178,30,0.25)] transition-transform hover:scale-[1.01] hover:bg-[#e7b21e] sm:w-auto"
                 >
                   <ShieldAlert className="h-4 w-4" />
-                  {reportPanelOpen ? "Close Form" : "Report Blocking Vehicle"}
+                  {reportPanelOpen ? "Hide Report Form" : "Open Report Form"}
                 </button>
               </div>
+              {!reportPanelOpen ? (
+                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-accent-amber">
+                  Report form is hidden. Tap Open Report Form to start a new report.
+                </p>
+              ) : null}
 
               {submitMessage ? (
-                <p className="mt-4 inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                <p className="mt-4 inline-flex items-center gap-2 whitespace-pre-line rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   {submitMessage}
                 </p>
@@ -675,86 +779,75 @@ function ParkingPatrolPageContent() {
                   {submitError}
                 </p>
               ) : null}
+              {unmatchedReport ? (
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <button
+                    type="button"
+                    onClick={handleCopyUnmatchedDetails}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-accent-amber bg-accent-amber px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-campus-black transition-colors hover:bg-[#e7b21e]"
+                  >
+                    <Copy className="h-4 w-4" />
+                    Copy Report Details
+                  </button>
+                  {copyDetailsMessage ? (
+                    <p className="text-xs font-semibold text-accent-amber">{copyDetailsMessage}</p>
+                  ) : null}
+                </div>
+              ) : null}
 
               {reportPanelOpen ? (
-                <div className="mt-5 space-y-5 rounded-2xl border border-white/10 bg-black/35 p-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-3">
-                      <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
-                        Upload / Capture Photo (Optional)
-                      </label>
-                      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] px-4 py-4 text-xs font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-white/[0.06]">
-                        <Camera className="h-4 w-4 text-accent-amber" />
-                        Choose Incident Photo
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          className="hidden"
-                          onChange={(event) => {
-                            const file = event.target.files?.[0] || null;
-                            void handlePhotoChange(file);
-                          }}
-                        />
-                      </label>
-
-                      {photoPreview ? (
-                        <div className="overflow-hidden rounded-xl border border-white/10">
-                          <img
-                            src={photoPreview}
-                            alt="Incident preview"
-                            className="h-48 w-full object-cover"
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.01] text-xs text-text-secondary">
-                          Photo preview will appear here.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-3">
-                      <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
-                        Plate Extraction
-                      </label>
-                      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-                        <div className="mb-2 flex items-center justify-between text-[11px] text-text-secondary">
-                          <span>OCR Status</span>
-                          <span>{isRunningOcr ? `${ocrProgress}%` : "Idle"}</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            className="h-full bg-gradient-to-r from-accent-amber to-yellow-300 transition-all duration-300"
-                            style={{ width: `${isRunningOcr ? ocrProgress : 0}%` }}
-                          />
-                        </div>
-                        <p className="mt-2 text-[11px] text-text-secondary">
-                          {isRunningOcr
-                            ? "Scanning plate text from your uploaded image..."
-                            : "You can edit the extracted plate before submitting."}
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
-                          Extracted Plate (Editable)
-                        </label>
-                        <input
-                          type="text"
-                          value={plateInput}
-                          onChange={(event) =>
-                            setPlateInput(formatParkingReportPlateInput(event.target.value))
-                          }
-                          placeholder="KA-09-AB-1234"
-                          className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm font-mono tracking-widest text-white outline-none transition-colors placeholder:text-white/30 focus:border-accent-amber/60"
-                        />
-                      </div>
-                    </div>
+                <div className="mt-5 space-y-5 rounded-2xl border border-white/10 bg-black/30 p-4 sm:p-5">
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
+                      Vehicle Plate
+                    </label>
+                    <input
+                      type="text"
+                      value={plateInput}
+                      onChange={(event) =>
+                        setPlateInput(formatParkingReportPlateInput(event.target.value))
+                      }
+                      placeholder="KA-09-AB-1234"
+                      className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-base font-mono tracking-widest text-white outline-none transition-colors placeholder:text-white/30 focus:border-accent-amber/60"
+                    />
                   </div>
 
                   <div className="space-y-3">
                     <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
-                      Location Description
+                      Photo (Optional)
+                    </label>
+                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] px-4 py-4 text-xs font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-white/[0.06]">
+                      <Camera className="h-4 w-4 text-accent-amber" />
+                      {isRunningOcr ? "Extracting plate..." : "Upload or capture photo"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] || null;
+                          void handlePhotoChange(file);
+                        }}
+                      />
+                    </label>
+                    {photoPreview ? (
+                      <div className="overflow-hidden rounded-xl border border-white/10">
+                        <img
+                          src={photoPreview}
+                          alt="Incident preview"
+                          className="h-52 w-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.01] text-xs text-text-secondary">
+                        Photo preview appears here
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
+                      Location / Reporter Note
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {COMMON_LOCATION_ZONES.map((zone) => (
@@ -772,11 +865,11 @@ function ParkingPatrolPageContent() {
                         </button>
                       ))}
                     </div>
-                    <input
-                      type="text"
+                    <textarea
                       value={locationInput}
                       onChange={(event) => setLocationInput(event.target.value)}
-                      placeholder="Example: Blocked my car from moving out near Library Gate side lane."
+                      placeholder="Example: You have blocked my bike exit near Library Gate."
+                      rows={4}
                       className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-white/30 focus:border-accent-amber/60"
                     />
                   </div>
@@ -784,8 +877,8 @@ function ParkingPatrolPageContent() {
                   <button
                     type="button"
                     onClick={handleSubmitReport}
-                    disabled={isSubmitting}
-                    className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20 disabled:opacity-60"
+                    disabled={isSubmitting || !isLoggedIn}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20 disabled:opacity-60"
                   >
                     {isSubmitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -798,10 +891,10 @@ function ParkingPatrolPageContent() {
               ) : null}
             </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 md:p-6">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-sm font-black uppercase tracking-[0.2em] text-text-secondary">
-                  Scoped Incident Thread
+                  Live Incident Thread
                 </h2>
                 {selectedReport ? (
                   <span
@@ -814,244 +907,199 @@ function ParkingPatrolPageContent() {
 
               {!selectedReport ? (
                 isLoadingReports ? (
-                  <div className="mt-4 animate-pulse space-y-3">
+                  <div className="animate-pulse space-y-3">
                     <div className="h-16 rounded-xl bg-white/10" />
                     <div className="h-28 rounded-xl bg-white/10" />
                     <div className="h-12 rounded-xl bg-white/10" />
                   </div>
                 ) : (
-                  <p className="mt-4 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-text-secondary">
-                    Select a report from the list to view timeline and thread.
+                  <p className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-text-secondary">
+                    No live report is active for your account right now.
                   </p>
                 )
               ) : (
-                <div className="mt-4 space-y-4">
-                  <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-mono text-lg font-bold tracking-wider">
-                          {selectedReport.license_plate}
-                        </p>
-                        <p className="mt-1 text-xs text-text-secondary">
-                          {selectedReport.location_description} • {formatElapsed(selectedReport.created_at)}
-                        </p>
-                      </div>
-                      {(selectedReport.status === "pending" || selectedReport.status === "chatting") && (
-                        <div className="inline-flex items-center gap-1 rounded-full border border-white/15 px-3 py-1 text-[11px] text-text-secondary">
+                <div className="space-y-4">
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="font-mono text-lg font-bold tracking-wider">
+                        {selectedReport.license_plate}
+                      </p>
+                      <p className="mt-1 text-xs text-text-secondary">
+                        Reporter note: {selectedReport.location_description}
+                      </p>
+                      <p className="mt-1 text-[11px] text-white/50">
+                        Created {formatElapsed(selectedReport.created_at)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {(selectedReport.status === "pending" ||
+                        selectedReport.status === "chatting") && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-white/15 px-3 py-1 text-[11px] text-text-secondary">
                           <Clock3 className="h-3.5 w-3.5" />
                           {formatTwoMinuteCountdown(selectedReport.created_at, clockMs)}
-                        </div>
+                        </span>
                       )}
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {canOwnerAcknowledge ? (
-                        <button
-                          type="button"
-                          onClick={handleOwnerAcknowledge}
-                          disabled={isAcknowledging}
-                          className="rounded-lg border border-emerald-400/40 bg-emerald-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-100 transition-colors hover:bg-emerald-500/30 disabled:opacity-60"
-                        >
-                          {isAcknowledging ? "Updating..." : "I'm Moving ✅"}
-                        </button>
-                      ) : null}
-
-                      {canReporterResolve ? (
-                        <button
-                          type="button"
-                          onClick={handleReporterResolve}
-                          disabled={isResolving}
-                          className="rounded-lg border border-green-400/40 bg-green-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-green-100 transition-colors hover:bg-green-500/30 disabled:opacity-60"
-                        >
-                          {isResolving ? "Resolving..." : "Mark as Resolved"}
-                        </button>
-                      ) : null}
-
-                      {canCallOwner ? (
-                        <button
-                          type="button"
-                          onClick={handleRevealAndCall}
-                          disabled={isCallingOwner}
-                          className="rounded-lg border border-orange-400/40 bg-orange-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-orange-100 transition-colors hover:bg-orange-500/30 disabled:opacity-60"
-                        >
-                          {isCallingOwner ? "Revealing..." : "Call Owner"}
-                        </button>
-                      ) : null}
-
-                      {ownerPhone ? (
-                        <a
-                          href={`tel:${ownerPhone}`}
-                          className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white"
-                        >
-                          <PhoneCall className="h-3.5 w-3.5" />
-                          {ownerPhone}
-                        </a>
-                      ) : null}
+                      <span
+                        className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${STATUS_THEME[selectedReport.status]}`}
+                      >
+                        {selectedReport.status.replace("_", " ")}
+                      </span>
                     </div>
                   </div>
 
-                  {isUnmatchedReport ? (
-                    <div className="rounded-2xl border border-slate-400/30 bg-slate-500/10 px-4 py-4 text-sm text-slate-200">
-                      This vehicle is not registered in NIE Campus Sync. Your report has been logged. No further
-                      escalation is triggered for unmatched plates.
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                      {!chatWindowOpen &&
-                      (selectedReport.status === "pending" || selectedReport.status === "chatting") ? (
-                        <div className="mb-3 rounded-lg border border-indigo-400/35 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-100">
-                          Chat window closed after 2 minutes. Escalation email stage is active.
-                        </div>
-                      ) : null}
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {canOwnerAcknowledge ? (
+                      <button
+                        type="button"
+                        onClick={handleOwnerAcknowledge}
+                        disabled={isAcknowledging}
+                        className="rounded-lg border border-emerald-400/40 bg-emerald-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-100 transition-colors hover:bg-emerald-500/30 disabled:opacity-60"
+                      >
+                        {isAcknowledging ? "Updating..." : "I am moving"}
+                      </button>
+                    ) : null}
 
-                      <div className="max-h-[320px] space-y-3 overflow-y-auto pr-1">
-                        {messages.length === 0 ? (
-                          <p className="rounded-lg border border-dashed border-white/10 px-3 py-4 text-xs text-text-secondary">
-                            No messages in this thread yet.
-                          </p>
-                        ) : (
-                          messages.map((message) => (
-                            <div
-                              key={message.id}
-                              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-text-secondary">
-                                  {getThreadRoleLabel(message, Boolean(isReporter), Boolean(isOwner))}
-                                </span>
-                                <span className="text-[10px] text-white/40">
-                                  {formatElapsed(message.created_at)}
-                                </span>
-                              </div>
-                              <p className="mt-1 text-sm text-white/90">{message.message}</p>
-                            </div>
-                          ))
-                        )}
-                      </div>
+                    {canReporterResolve ? (
+                      <button
+                        type="button"
+                        onClick={handleReporterResolve}
+                        disabled={isResolving}
+                        className="rounded-lg border border-green-400/40 bg-green-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-green-100 transition-colors hover:bg-green-500/30 disabled:opacity-60"
+                      >
+                        {isResolving ? "Resolving..." : "Mark resolved"}
+                      </button>
+                    ) : null}
 
-                      <div className="mt-4 flex gap-2">
-                        <input
-                          type="text"
-                          value={threadDraft}
-                          onChange={(event) => setThreadDraft(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              void handleSendThreadMessage();
-                            }
-                          }}
-                          placeholder="Send a message in this thread..."
-                          disabled={isChatReadOnly || isSendingMessage}
-                          className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-white/30 focus:border-accent-blue/60 disabled:opacity-60"
-                        />
+                    {isReporter && selectedReport.status === "acknowledged" ? (
+                      canMarkUnresolved ? (
                         <button
                           type="button"
-                          onClick={handleSendThreadMessage}
-                          disabled={
-                            isChatReadOnly ||
-                            !threadDraft.trim() ||
-                            isSendingMessage
-                          }
-                          className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20 disabled:opacity-60"
+                          onClick={handleReporterMarkUnresolved}
+                          disabled={isMarkingUnresolved}
+                          className="rounded-lg border border-amber-400/40 bg-amber-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-100 transition-colors hover:bg-amber-500/30 disabled:opacity-60"
                         >
-                          {isSendingMessage ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Send className="h-4 w-4" />
-                          )}
-                          Send
+                          {isMarkingUnresolved ? "Updating..." : "Still blocked (unresolved)"}
                         </button>
-                      </div>
-
-                      {!chatWindowOpen || selectedReport.status === "resolved" ? (
-                        <div className="mt-3">
-                          <button
-                            type="button"
-                            onClick={handleDownloadTranscript}
-                            disabled={messages.length === 0}
-                            className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition-colors hover:bg-white/20 disabled:opacity-60"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            Download Transcript
-                          </button>
+                      ) : (
+                        <div className="flex items-center rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-amber-100/90">
+                          Unresolved opens in {unresolvedCountdown}
                         </div>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-              )}
+                      )
+                    ) : null}
 
-              {threadActionError ? (
-                <p className="mt-4 inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  {threadActionError}
-                </p>
-              ) : null}
+                    {canCallOwner ? (
+                      <button
+                        type="button"
+                        onClick={handleRevealAndCall}
+                        disabled={isCallingOwner}
+                        className="rounded-lg border border-orange-400/40 bg-orange-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-orange-100 transition-colors hover:bg-orange-500/30 disabled:opacity-60"
+                      >
+                        {isCallingOwner ? "Revealing..." : "Reveal and call owner"}
+                      </button>
+                    ) : null}
+
+                    {ownerPhone ? (
+                      <a
+                        href={`tel:${ownerPhone}`}
+                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white"
+                      >
+                        <PhoneCall className="h-3.5 w-3.5" />
+                        {ownerPhone}
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  {!chatWindowOpen &&
+                  (selectedReport.status === "pending" ||
+                    selectedReport.status === "chatting") ? (
+                    <div className="mb-3 rounded-lg border border-indigo-400/35 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-100">
+                      Chat window closed after 2 minutes. Escalation stage is active.
+                    </div>
+                  ) : null}
+
+                  <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+                    {messages.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-white/10 px-3 py-4 text-xs text-text-secondary">
+                        No messages in this thread yet.
+                      </p>
+                    ) : (
+                      messages.map((message) => (
+                        <div
+                          key={message.id}
+                          className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-text-secondary">
+                              {getThreadRoleLabel(message, Boolean(isReporter), Boolean(isOwner))}
+                            </span>
+                            <span className="text-[10px] text-white/40">
+                              {formatElapsed(message.created_at)}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-white/90">{message.message}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      value={threadDraft}
+                      onChange={(event) => setThreadDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void handleSendThreadMessage();
+                        }
+                      }}
+                      placeholder="Send a message in this thread..."
+                      disabled={isChatReadOnly || isSendingMessage}
+                      className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-white/30 focus:border-accent-blue/60 disabled:opacity-60"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSendThreadMessage}
+                      disabled={isChatReadOnly || !threadDraft.trim() || isSendingMessage}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20 disabled:opacity-60"
+                    >
+                      {isSendingMessage ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                      Send
+                    </button>
+                  </div>
+
+                  {!chatWindowOpen || selectedReport.status === "resolved" ? (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={handleDownloadTranscript}
+                        disabled={messages.length === 0}
+                        className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition-colors hover:bg-white/20 disabled:opacity-60"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Download transcript
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                {threadActionError ? (
+                  <p className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    {threadActionError}
+                  </p>
+                ) : null}
+              </div>
+            )}
             </div>
           </section>
-
-          <aside className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-sm font-black uppercase tracking-[0.2em] text-text-secondary">
-                  Reports
-                </h2>
-                {isLoadingReports ? <Loader2 className="h-4 w-4 animate-spin text-white/50" /> : null}
-              </div>
-
-              <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
-                {isLoadingReports ? (
-                  Array.from({ length: 5 }).map((_, index) => (
-                    <div
-                      key={`report-skeleton-${index}`}
-                      className="animate-pulse rounded-xl border border-white/10 bg-black/30 px-3 py-3"
-                    >
-                      <div className="h-4 w-2/5 rounded bg-white/10" />
-                      <div className="mt-2 h-3 w-4/5 rounded bg-white/10" />
-                      <div className="mt-3 h-2 w-1/4 rounded bg-white/10" />
-                    </div>
-                  ))
-                ) : reports.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-white/10 px-3 py-4 text-xs text-text-secondary">
-                    No reports visible yet.
-                  </p>
-                ) : (
-                  reports.map((report) => {
-                    const active = report.id === selectedReportId;
-                    return (
-                      <button
-                        key={report.id}
-                        type="button"
-                        onClick={() => setSelectedReportId(report.id)}
-                        className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
-                          active
-                            ? "border-accent-blue/45 bg-accent-blue/15"
-                            : "border-white/10 bg-black/30 hover:border-white/25"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="font-mono text-sm font-semibold tracking-wider text-white">
-                            {report.license_plate}
-                          </p>
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] ${STATUS_THEME[report.status]}`}
-                          >
-                            {report.status.replace("_", " ")}
-                          </span>
-                        </div>
-                        <p className="mt-1 line-clamp-1 text-xs text-text-secondary">
-                          {report.location_description}
-                        </p>
-                        <p className="mt-2 text-[10px] text-white/40">{formatElapsed(report.created_at)}</p>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-          </aside>
-        </div>
       </div>
     </main>
   );
@@ -1061,17 +1109,13 @@ export default function ParkingPatrolPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-36 text-white md:px-8">
+        <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
           <div className="mx-auto w-full max-w-7xl animate-pulse space-y-6">
             <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
-            <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-              <div className="space-y-6">
-                <div className="h-64 rounded-3xl border border-white/10 bg-white/[0.03]" />
-                <div className="h-80 rounded-3xl border border-white/10 bg-white/[0.03]" />
-              </div>
-              <div className="space-y-6">
-                <div className="h-[560px] rounded-3xl border border-white/10 bg-white/[0.03]" />
-              </div>
+            <div className="space-y-6">
+              <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
+              <div className="h-[46vh] rounded-3xl border border-white/10 bg-white/[0.03]" />
+              <div className="h-[36vh] rounded-3xl border border-white/10 bg-white/[0.03]" />
             </div>
           </div>
         </main>

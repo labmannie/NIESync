@@ -10,7 +10,7 @@ type OwnerReportBannerRow = {
   id: string;
   license_plate: string;
   location_description: string;
-  status: "pending" | "chatting";
+  status: "pending" | "chatting" | "email_sent";
   created_at: string;
   email_sent_at: string | null;
 };
@@ -81,7 +81,8 @@ export function ParkingOwnerBanner() {
         .from("parking_reports")
         .select("id, license_plate, location_description, status, created_at, email_sent_at")
         .eq("matched_owner_id", userId)
-        .in("status", ["pending", "chatting"])
+        .in("status", ["pending", "chatting", "email_sent"])
+        .is("resolved_at", null)
         .order("created_at", { ascending: true })
         .limit(5);
 
@@ -98,6 +99,9 @@ export function ParkingOwnerBanner() {
     };
 
     loadReports();
+    const poll = window.setInterval(() => {
+      loadReports();
+    }, 30000);
 
     const channel = supabase
       .channel(`parking-owner-banner-${userId}`)
@@ -117,6 +121,7 @@ export function ParkingOwnerBanner() {
 
     return () => {
       isMounted = false;
+      window.clearInterval(poll);
       supabase.removeChannel(channel);
     };
   }, [supabase, userId]);
@@ -125,22 +130,29 @@ export function ParkingOwnerBanner() {
 
   if (!pathname) return null;
   if (pathname.startsWith("/auth") || pathname.startsWith("/resolve")) return null;
+  if (pathname.startsWith("/profile/reports")) return null;
   if (HIDDEN_ROUTES.includes(pathname)) return null;
   if (!activeReport) return null;
 
   const countdownVisible =
     activeReport.status === "pending" || activeReport.status === "chatting";
+  const canAcknowledge =
+    activeReport.status === "pending" ||
+    activeReport.status === "chatting" ||
+    activeReport.status === "email_sent";
   const createdAtMs = new Date(activeReport.created_at).getTime();
   const isChatWindowClosed = Number.isFinite(createdAtMs)
     ? currentTimeMs - createdAtMs >= 2 * 60 * 1000
     : false;
   const countdownText = formatCountdown(activeReport.created_at, currentTimeMs);
   const stageLabel =
-    isChatWindowClosed
-      ? "Chat window closed. Escalation email is being sent."
-      : activeReport.status === "pending"
-        ? "Waiting for your response"
-        : "Chat is active";
+    activeReport.status === "email_sent"
+      ? "Chat window closed. Escalation is active."
+      : isChatWindowClosed
+        ? "Chat window closed. Escalation is active."
+        : activeReport.status === "pending"
+          ? "Waiting for your response"
+          : "Chat is active";
 
   const handleImMoving = async () => {
     if (!activeReport?.id) return;
@@ -167,8 +179,8 @@ export function ParkingOwnerBanner() {
           </div>
           <div>
             <p className="text-sm font-semibold">
-              Your vehicle <span className="font-mono">{activeReport.license_plate}</span> was reported near{" "}
-              {activeReport.location_description}.
+              Your vehicle <span className="font-mono">{activeReport.license_plate}</span> was reported.
+              <span className="ml-1 text-amber-100/90">Note: {activeReport.location_description}</span>
             </p>
             <p className="mt-0.5 text-xs text-amber-100/90">
               {stageLabel}
@@ -189,17 +201,19 @@ export function ParkingOwnerBanner() {
             href={`/parking-patrol?report=${activeReport.id}`}
             className="inline-flex items-center justify-center rounded-lg border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-white/20"
           >
-            View and Respond
+            Open Report
           </Link>
-          <button
-            type="button"
-            onClick={handleImMoving}
-            disabled={isResolving}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-500/20 px-4 py-2 text-xs font-bold uppercase tracking-wider text-emerald-100 transition-colors hover:bg-emerald-500/30 disabled:opacity-60"
-          >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {isResolving ? "Updating..." : "I'm Moving"}
-          </button>
+          {canAcknowledge ? (
+            <button
+              type="button"
+              onClick={handleImMoving}
+              disabled={isResolving}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-500/20 px-4 py-2 text-xs font-bold uppercase tracking-wider text-emerald-100 transition-colors hover:bg-emerald-500/30 disabled:opacity-60"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {isResolving ? "Updating..." : "I'm Moving"}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

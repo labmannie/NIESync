@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "module": "commonjs",
+    "target": "ES2020",
+    "moduleResolution": "node"
+  },
+  "include": ["tests/**/*.ts", "lib/parkingReportPermissions.ts"]
+}

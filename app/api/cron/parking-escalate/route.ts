@@ -53,12 +53,12 @@ function getOwnerDisplayName(owner: OwnerProfile | null) {
   return combined || "Vehicle Owner";
 }
 
-function resolveAppBaseUrl() {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (!appUrl) {
-    throw new Error("Missing NEXT_PUBLIC_APP_URL.");
+function resolveAppBaseUrl(request: NextRequest) {
+  const configured = String(process.env.NEXT_PUBLIC_APP_URL || "").trim();
+  if (configured) {
+    return configured.replace(/\/$/, "");
   }
-  return appUrl.replace(/\/$/, "");
+  return request.nextUrl.origin.replace(/\/$/, "");
 }
 
 function getDueCutoffIso() {
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = getSupabaseAdminClient();
-    const appBaseUrl = resolveAppBaseUrl();
+    const appBaseUrl = resolveAppBaseUrl(request);
 
     const { data: reports, error: reportsError } = await supabase
       .from("parking_reports")

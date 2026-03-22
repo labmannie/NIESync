@@ -34,6 +34,15 @@ function mapThreadActionError(message: string) {
   if (normalized.includes("chat is disabled for unmatched reports")) {
     return "Chat is not available for unmatched reports.";
   }
+  if (normalized.includes("cannot be resolved at this stage")) {
+    return "You can resolve after owner acknowledgement, or after owner phone is revealed in email escalation stage.";
+  }
+  if (normalized.includes("can be marked unresolved only 5 minutes")) {
+    return "You can mark unresolved only after 5 minutes from owner acknowledgement.";
+  }
+  if (normalized.includes("report cannot be marked unresolved")) {
+    return "This report cannot be marked unresolved right now.";
+  }
   return message || "Unable to complete this action.";
 }
 
@@ -190,6 +199,21 @@ export async function reporterMarkResolvedAction(reportId: string): Promise<Basi
   });
 
   if (error) return { ok: false, error: mapThreadActionError(error.message || "Unable to resolve report.") };
+  return { ok: true };
+}
+
+export async function reporterMarkUnresolvedAction(reportId: string): Promise<BasicActionResult> {
+  const supabase = await createServerClient();
+  const { error } = await supabase.rpc("parking_reporter_mark_unresolved", {
+    _report_id: reportId,
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      error: mapThreadActionError(error.message || "Unable to reopen this report."),
+    };
+  }
   return { ok: true };
 }
 

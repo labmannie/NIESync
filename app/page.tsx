@@ -181,7 +181,8 @@ function LostFoundCard() {
       initial={{ opacity: 0, x: 30 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.8, delay: 0.4 }}
-      className="glass-card shine-effect w-full lg:w-[360px] p-6 rounded-sm relative group cursor-pointer hover:border-white/40 transition-all duration-500 lg:-ml-12 z-20 lg:mb-6 lg:shadow-[-30px_0_50px_-10px_rgba(0,0,0,0.8)]"
+      // REMOVED the negative margins and overlapping shadow here
+      className="glass-card shine-effect w-full lg:w-[360px] p-6 rounded-sm relative group cursor-pointer hover:border-white/40 transition-all duration-500 z-20"
     >
       <div className="flex justify-between items-start mb-6">
         <h3 className="text-white font-bold text-xs uppercase tracking-[0.15em]">Recently Found</h3>

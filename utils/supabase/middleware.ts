@@ -67,13 +67,30 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // refreshing the auth token and fetching user
-  let {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  // Refresh auth token + fetch user/session, but fail gracefully on transient auth outages.
+  let user: any = null;
+  let session: any = null;
+  let authLookupFailed = false;
+
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+
+    if (userError) {
+      authLookupFailed = true;
+      console.error('Supabase auth.getUser failed in middleware:', userError.message);
+    }
+    if (sessionError) {
+      authLookupFailed = true;
+      console.error('Supabase auth.getSession failed in middleware:', sessionError.message);
+    }
+
+    user = userData?.user || null;
+    session = sessionData?.session || null;
+  } catch (error) {
+    authLookupFailed = true;
+    console.error('Supabase auth lookup crashed in middleware:', error);
+  }
 
   let hasProfile = false;
   let needsOnboarding = false;
@@ -129,37 +146,50 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id, user_type, role, usn, has_vehicle, vehicle_no')
-      .eq('id', user.id)
-      .maybeSingle();
-    
-    if (profile) {
-      hasProfile = true;
+    try {
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, user_type, role, usn, has_vehicle, vehicle_no')
+        .eq('id', user.id)
+        .maybeSingle();
 
-      const resolvedUserType =
-        profile.user_type || (profile.role === 'Faculty' ? 'Faculty' : 'Student');
-
-      const studentNeedsUsn =
-        resolvedUserType === 'Student' &&
-        (!profile.usn || !String(profile.usn).trim());
-
-      let hasAnyVehicle = !!profile.vehicle_no;
-      if (profile.has_vehicle && !hasAnyVehicle) {
-        const { count } = await supabase
-          .from('profile_vehicles')
-          .select('id', { count: 'exact', head: true })
-          .eq('profile_id', user.id);
-
-        hasAnyVehicle = (count || 0) > 0;
+      if (profileError) {
+        throw profileError;
       }
 
-      needsOnboarding = studentNeedsUsn || (!!profile.has_vehicle && !hasAnyVehicle);
-    } else {
-      needsOnboarding = true;
+      if (profile) {
+        hasProfile = true;
+
+        const resolvedUserType =
+          profile.user_type || (profile.role === 'Faculty' ? 'Faculty' : 'Student');
+
+        const studentNeedsUsn =
+          resolvedUserType === 'Student' &&
+          (!profile.usn || !String(profile.usn).trim());
+
+        let hasAnyVehicle = !!profile.vehicle_no;
+        if (profile.has_vehicle && !hasAnyVehicle) {
+          const { count, error: vehicleCountError } = await supabase
+            .from('profile_vehicles')
+            .select('id', { count: 'exact', head: true })
+            .eq('profile_id', user.id);
+
+          if (vehicleCountError) {
+            throw vehicleCountError;
+          }
+
+          hasAnyVehicle = (count || 0) > 0;
+        }
+
+        needsOnboarding = studentNeedsUsn || (!!profile.has_vehicle && !hasAnyVehicle);
+      } else {
+        needsOnboarding = true;
+      }
+    } catch (error) {
+      authLookupFailed = true;
+      console.error('Profile lookup failed in middleware:', error);
     }
   }
 
-  return { response, user, hasProfile, needsOnboarding, sessionRevoked };
+  return { response, user, hasProfile, needsOnboarding, sessionRevoked, authLookupFailed };
 }

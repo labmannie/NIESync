@@ -50,6 +50,9 @@ function mapThreadActionError(message: string) {
   if (normalized.includes("report cannot be marked unresolved")) {
     return "This report cannot be marked unresolved right now.";
   }
+  if (normalized.includes("reopened at most 2 times")) {
+    return "You have reached the reopen limit for this report (max 2 times).";
+  }
   return message || "Unable to complete this action.";
 }
 
@@ -117,6 +120,26 @@ async function uploadIncidentPhoto(userId: string, imageFile: File) {
   }
 
   return data?.path || path;
+}
+
+export async function getParkingIncidentPhotoUrlAction(
+  photoPath: string
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  const normalizedPath = String(photoPath || "").trim();
+  if (!normalizedPath) {
+    return { ok: false, error: "Photo path is missing." };
+  }
+
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage
+    .from(INCIDENT_PHOTOS_BUCKET)
+    .createSignedUrl(normalizedPath, 60 * 60);
+
+  if (error) {
+    return { ok: false, error: error.message || "Unable to generate photo URL." };
+  }
+
+  return { ok: true, url: String(data?.signedUrl || "") };
 }
 
 export async function submitParkingReportAction(

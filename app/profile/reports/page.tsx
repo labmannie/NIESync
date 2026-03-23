@@ -3,8 +3,12 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, CheckCircle2, Download, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Download, Loader2, RotateCcw } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import {
+  getParkingIncidentPhotoUrlAction,
+  reporterMarkUnresolvedAction,
+} from "@/app/parking-patrol/actions";
 import { type ParkingStatus } from "@/lib/parkingReportPermissions";
 
 type ParkingReportRow = {
@@ -16,6 +20,7 @@ type ParkingReportRow = {
   status: ParkingStatus;
   resolved_at: string | null;
   created_at: string;
+  photo_url: string | null;
 };
 
 type ParkingMessageRow = {
@@ -57,6 +62,9 @@ function ProfileReportsArchivePageContent() {
   const [messages, setMessages] = useState<ParkingMessageRow[]>([]);
   const [schemaError, setSchemaError] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [isReopening, setIsReopening] = useState(false);
+  const [reportPhotoUrlById, setReportPhotoUrlById] = useState<Record<string, string>>({});
 
   const reportIdFromQuery = searchParams.get("report") || "";
 
@@ -68,7 +76,7 @@ function ProfileReportsArchivePageContent() {
     const { data, error } = await supabase
       .from("parking_reports")
       .select(
-        "id, reported_by, license_plate, location_description, matched_owner_id, status, resolved_at, created_at"
+        "id, reported_by, license_plate, location_description, matched_owner_id, status, resolved_at, created_at, photo_url"
       )
       .in("status", ["resolved", "unmatched"])
       .order("created_at", { ascending: false })
@@ -173,6 +181,24 @@ function ProfileReportsArchivePageContent() {
   const selectedReport = reports.find((report) => report.id === selectedReportId) || null;
   const isReporter = selectedReport?.reported_by === userId;
   const isOwner = selectedReport?.matched_owner_id === userId;
+  const selectedReportPhotoUrl = selectedReport ? reportPhotoUrlById[selectedReport.id] || "" : "";
+
+  useEffect(() => {
+    if (!selectedReport?.id || !selectedReport.photo_url) return;
+    if (reportPhotoUrlById[selectedReport.id]) return;
+
+    let cancelled = false;
+    const loadSignedPhoto = async () => {
+      const result = await getParkingIncidentPhotoUrlAction(selectedReport.photo_url || "");
+      if (cancelled || !result.ok || !result.url) return;
+      setReportPhotoUrlById((prev) => ({ ...prev, [selectedReport.id]: result.url! }));
+    };
+
+    void loadSignedPhoto();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedReport?.id, selectedReport?.photo_url, reportPhotoUrlById]);
 
   const handleDownloadTranscript = () => {
     if (!selectedReport || messages.length === 0) return;
@@ -208,6 +234,24 @@ function ProfileReportsArchivePageContent() {
     URL.revokeObjectURL(url);
   };
 
+  const handleReopenResolvedReport = async () => {
+    if (!selectedReport) return;
+    setActionError("");
+    setIsReopening(true);
+
+    const result = await reporterMarkUnresolvedAction(selectedReport.id);
+    setIsReopening(false);
+
+    if (!result.ok) {
+      setActionError(result.error || "Unable to reopen this report.");
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.location.href = `/parking-patrol?report=${selectedReport.id}`;
+    }
+  };
+
   return (
     <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
       <div className="mx-auto w-full max-w-7xl">
@@ -240,6 +284,12 @@ function ProfileReportsArchivePageContent() {
           <div className="mb-6 inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
             <AlertCircle className="h-3.5 w-3.5" />
             {loadError}
+          </div>
+        ) : null}
+        {actionError ? (
+          <div className="mb-6 inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            <AlertCircle className="h-3.5 w-3.5" />
+            {actionError}
           </div>
         ) : null}
 
@@ -345,6 +395,15 @@ function ProfileReportsArchivePageContent() {
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                  {selectedReportPhotoUrl ? (
+                    <div className="mb-4 overflow-hidden rounded-xl border border-white/10">
+                      <img
+                        src={selectedReportPhotoUrl}
+                        alt={`Incident photo for ${selectedReport.license_plate}`}
+                        className="h-48 w-full object-cover"
+                      />
+                    </div>
+                  ) : null}
                   <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
                     {messages.length === 0 ? (
                       <p className="rounded-lg border border-dashed border-white/10 px-3 py-4 text-xs text-text-secondary">
@@ -371,6 +430,17 @@ function ProfileReportsArchivePageContent() {
                   </div>
 
                   <div className="mt-4">
+                    {selectedReport.status === "resolved" && isReporter ? (
+                      <button
+                        type="button"
+                        onClick={handleReopenResolvedReport}
+                        disabled={isReopening}
+                        className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-400/35 bg-amber-500/15 px-3 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-100 transition-colors hover:bg-amber-500/20 disabled:opacity-60"
+                      >
+                        {isReopening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                        {isReopening ? "Reopening..." : "Mark Unresolved (Reopen)"}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={handleDownloadTranscript}

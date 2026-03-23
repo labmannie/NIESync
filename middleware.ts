@@ -4,8 +4,24 @@ import type { NextRequest } from 'next/server';
 import { updateSession } from '@/utils/supabase/middleware';
 
 export async function middleware(request: NextRequest) {
-  // Let the Supabase SSR middleware handle session cookie refresh and fetch user
-  const { response, user, hasProfile, needsOnboarding, sessionRevoked } = await updateSession(request);
+  let sessionState:
+    | Awaited<ReturnType<typeof updateSession>>
+    | null = null;
+
+  try {
+    // Let the Supabase SSR middleware handle session cookie refresh and fetch user.
+    sessionState = await updateSession(request);
+  } catch (error) {
+    console.error('middleware updateSession failed:', error);
+    return NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    });
+  }
+
+  const { response, user, hasProfile, needsOnboarding, sessionRevoked, authLookupFailed } =
+    sessionState;
   
   const { pathname } = request.nextUrl;
   const protectedRoutes = ['/lost-and-found', '/parking-patrol', '/leaderboard', '/profile'];
@@ -25,6 +41,11 @@ export async function middleware(request: NextRequest) {
 
   // 1. Unauthenticated users hitting protected routes -> Go to Login
   if (isProtectedRoute && !user) {
+    if (authLookupFailed) {
+      // Avoid forced logout loops during transient auth API failures.
+      return response;
+    }
+
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);

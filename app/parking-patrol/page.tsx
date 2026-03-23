@@ -21,6 +21,7 @@ import {
   validateParkingReportPlate,
 } from "@/lib/vehiclePlate";
 import {
+  getParkingIncidentPhotoUrlAction,
   ownerImMovingAction,
   reporterMarkUnresolvedAction,
   reporterMarkResolvedAction,
@@ -97,7 +98,7 @@ const COMMON_LOCATION_ZONES = [
 
 const LOCATION_OPTIONS = [...COMMON_LOCATION_ZONES, "Other"];
 const CHAT_WINDOW_SECONDS = 60;
-const PHONE_REVEAL_SECONDS = 120;
+const EMAIL_TO_CALL_SECONDS = 60;
 
 const STATUS_THEME: Record<ParkingStatus, string> = {
   pending: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
@@ -189,6 +190,13 @@ function getElapsedSeconds(createdAt: string, nowMs: number) {
   return Math.max(0, Math.floor((nowMs - startedMs) / 1000));
 }
 
+function parseOptionalDateMs(value: string | null | undefined) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return 0;
+  const parsed = new Date(normalized).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function formatCountdown(seconds: number) {
   if (seconds <= 0) return "—";
   const mm = Math.floor(seconds / 60);
@@ -196,42 +204,42 @@ function formatCountdown(seconds: number) {
   return `${mm}:${String(ss).padStart(2, "0")}`;
 }
 
-function getStage(report: ParkingReportRow | null, nowMs: number) {
-  if (!report) return 1;
-  const elapsed = getElapsedSeconds(report.created_at, nowMs);
-
-  if (report.phone_revealed || elapsed >= PHONE_REVEAL_SECONDS) return 3;
-  if (report.status === "email_sent" || report.email_sent_at || elapsed >= CHAT_WINDOW_SECONDS) {
-    return 2;
-  }
-  return 1;
-}
-
 function getStageCountdown(report: ParkingReportRow | null, nowMs: number) {
   if (!report) {
     return { display: "—", label: "LIVE TIMER", progress: 0, ringColor: "#888888" };
   }
 
-  const elapsed = getElapsedSeconds(report.created_at, nowMs);
-  const stage = getStage(report, nowMs);
+  const chatElapsed = getElapsedSeconds(report.created_at, nowMs);
+  const emailSentAtMs = parseOptionalDateMs(report.email_sent_at);
 
-  if (stage === 1) {
-    const remaining = Math.max(0, CHAT_WINDOW_SECONDS - elapsed);
+  if (chatElapsed < CHAT_WINDOW_SECONDS) {
+    const remaining = Math.max(0, CHAT_WINDOW_SECONDS - chatElapsed);
     return {
       display: formatCountdown(remaining),
       label: "CHAT WINDOW",
-      progress: Math.min(1, elapsed / CHAT_WINDOW_SECONDS),
+      progress: Math.min(1, chatElapsed / CHAT_WINDOW_SECONDS),
       ringColor: "#22c55e",
     };
   }
 
-  if (stage === 2) {
-    const elapsedInStage = Math.max(0, elapsed - CHAT_WINDOW_SECONDS);
-    const remaining = Math.max(0, PHONE_REVEAL_SECONDS - elapsed);
+  if (!emailSentAtMs) {
+    return {
+      display: "—",
+      label: "EMAIL DISPATCH",
+      progress: 0.1,
+      ringColor: "#f59e0b",
+    };
+  }
+
+  const emailElapsed = Math.max(0, Math.floor((nowMs - emailSentAtMs) / 1000));
+
+  if (!report.phone_revealed && emailElapsed < EMAIL_TO_CALL_SECONDS) {
+    const elapsedInStage = Math.max(0, emailElapsed);
+    const remaining = Math.max(0, EMAIL_TO_CALL_SECONDS - elapsedInStage);
     return {
       display: formatCountdown(remaining),
       label: "PHONE REVEAL",
-      progress: Math.min(1, elapsedInStage / (PHONE_REVEAL_SECONDS - CHAT_WINDOW_SECONDS)),
+      progress: Math.min(1, elapsedInStage / EMAIL_TO_CALL_SECONDS),
       ringColor: "#f5a623",
     };
   }
@@ -310,6 +318,7 @@ function ParkingPatrolPageContent() {
   const [revealedPhoneByReport, setRevealedPhoneByReport] = useState<Record<string, string>>(
     {}
   );
+  const [reportPhotoUrlById, setReportPhotoUrlById] = useState<Record<string, string>>({});
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -530,12 +539,24 @@ function ParkingPatrolPageContent() {
   const canMarkUnresolved = canReporterMarkUnresolved(selectedReport, userId, synchronizedNowMs);
   const canCallOwner = canReporterRevealOwnerPhone(selectedReport, userId, synchronizedNowMs);
   const ownerPhone = selectedReport ? revealedPhoneByReport[selectedReport.id] || "" : "";
+  const selectedReportPhotoUrl = selectedReport ? reportPhotoUrlById[selectedReport.id] || "" : "";
   const unresolvedCountdown = selectedReport?.acknowledged_at
     ? formatFiveMinuteCountdown(selectedReport.acknowledged_at, synchronizedNowMs)
     : "5:00";
-  const stage = getStage(selectedReport, synchronizedNowMs);
+  const chatElapsedSeconds = selectedReport
+    ? getElapsedSeconds(selectedReport.created_at, synchronizedNowMs)
+    : 0;
+  const hasEmailSentAt = Boolean(String(selectedReport?.email_sent_at || "").trim());
+  const emailElapsedSeconds =
+    selectedReport && hasEmailSentAt
+      ? getElapsedSeconds(String(selectedReport.email_sent_at || ""), synchronizedNowMs)
+      : 0;
+  const callReady =
+    Boolean(selectedReport) &&
+    hasEmailSentAt &&
+    (Boolean(selectedReport?.phone_revealed) || emailElapsedSeconds >= EMAIL_TO_CALL_SECONDS);
   const stageCountdown = getStageCountdown(selectedReport, synchronizedNowMs);
-  const stageLineFillPercent = stage === 1 ? 0 : stage === 2 ? 50 : 100;
+  const stageLineFillPercent = !selectedReport ? 0 : callReady ? 100 : chatElapsedSeconds >= CHAT_WINDOW_SECONDS ? 50 : 0;
   const circleRadius = 52;
   const circleLength = 2 * Math.PI * circleRadius;
   const circleOffset = circleLength * (1 - stageCountdown.progress);
@@ -544,6 +565,25 @@ function ParkingPatrolPageContent() {
     if (!messageListRef.current) return;
     messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
   }, [messages, selectedReport?.id]);
+
+  useEffect(() => {
+    if (!selectedReport?.id || !selectedReport.photo_url) return;
+    if (reportPhotoUrlById[selectedReport.id]) return;
+
+    let cancelled = false;
+
+    const loadSignedPhoto = async () => {
+      const result = await getParkingIncidentPhotoUrlAction(selectedReport.photo_url || "");
+      if (cancelled || !result.ok || !result.url) return;
+      setReportPhotoUrlById((prev) => ({ ...prev, [selectedReport.id]: result.url! }));
+    };
+
+    void loadSignedPhoto();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedReport?.id, selectedReport?.photo_url, reportPhotoUrlById]);
 
   const runOcr = async (image: Blob) => {
     setIsRunningOcr(true);
@@ -860,7 +900,7 @@ function ParkingPatrolPageContent() {
 
   return (
     <main className="min-h-screen w-full bg-[#0a0a0a] px-4 py-6 pb-20 pt-32 text-white">
-      <div className="mx-auto w-full max-w-[960px] space-y-3">
+      <div className="mx-auto w-full max-w-[640px] space-y-3">
         <header
           className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-md"
           style={{
@@ -991,7 +1031,6 @@ function ParkingPatrolPageContent() {
                     <input
                       type="file"
                       accept="image/*"
-                      capture="environment"
                       className="hidden"
                       onChange={(event) => {
                         const file = event.target.files?.[0] || null;
@@ -1138,8 +1177,14 @@ function ParkingPatrolPageContent() {
                         />
                         {["Chat", "Email", "Call"].map((label, index) => {
                           const node = index + 1;
-                          const completed = stage > node;
-                          const active = stage === node;
+                          const completed =
+                            node === 1 ? chatElapsedSeconds >= CHAT_WINDOW_SECONDS : node === 2 ? callReady : false;
+                          const active =
+                            node === 1
+                              ? chatElapsedSeconds < CHAT_WINDOW_SECONDS
+                              : node === 2
+                                ? chatElapsedSeconds >= CHAT_WINDOW_SECONDS && !callReady
+                                : callReady;
                           const nodeClass = completed
                             ? "bg-green-500 border-green-400"
                             : active
@@ -1202,6 +1247,16 @@ function ParkingPatrolPageContent() {
                         {selectedReport.status.replace("_", " ")}
                       </span>
                     </div>
+
+                    {selectedReportPhotoUrl ? (
+                      <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.06] bg-[#111]">
+                        <img
+                          src={selectedReportPhotoUrl}
+                          alt={`Incident photo for ${selectedReport.license_plate}`}
+                          className="h-44 w-full object-cover"
+                        />
+                      </div>
+                    ) : null}
 
                     <div className="mt-4 space-y-2">
                     {canOwnerAcknowledge ? (
@@ -1271,7 +1326,7 @@ function ParkingPatrolPageContent() {
                   (selectedReport.status === "pending" ||
                     selectedReport.status === "chatting") ? (
                     <div className="border-b border-white/[0.06] bg-blue-500/10 px-4 py-2 text-xs text-blue-300">
-                      Chat window closed after 1 minute. Escalation stage is active.
+                      Chat window closed after 1 minute. Escalation email is being dispatched.
                     </div>
                   ) : null}
 

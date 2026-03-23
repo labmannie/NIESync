@@ -17,6 +17,7 @@ function makeReport(overrides: Partial<ParkingReportAccessRow> = {}): ParkingRep
     status: "pending",
     phone_revealed: false,
     created_at: new Date(NOW - 30 * 1000).toISOString(),
+    email_sent_at: null,
     ...overrides,
   };
 }
@@ -62,7 +63,11 @@ function runTests() {
 
   assert.equal(
     canReporterRevealOwnerPhone(
-      makeReport({ status: "email_sent", created_at: new Date(NOW - 2 * 60 * 1000).toISOString() }),
+      makeReport({
+        status: "email_sent",
+        created_at: new Date(NOW - 2 * 60 * 1000).toISOString(),
+        email_sent_at: new Date(NOW - 60 * 1000).toISOString(),
+      }),
       "reporter-id",
       NOW
     ),
@@ -73,6 +78,19 @@ function runTests() {
       makeReport({
         status: "email_sent",
         created_at: new Date(NOW - (2 * 60 * 1000 - 1000)).toISOString(),
+        email_sent_at: new Date(NOW - (60 * 1000 - 1000)).toISOString(),
+      }),
+      "reporter-id",
+      NOW
+    ),
+    false
+  );
+  assert.equal(
+    canReporterRevealOwnerPhone(
+      makeReport({
+        status: "email_sent",
+        created_at: new Date(NOW - 20 * 60 * 1000).toISOString(),
+        email_sent_at: null,
       }),
       "reporter-id",
       NOW

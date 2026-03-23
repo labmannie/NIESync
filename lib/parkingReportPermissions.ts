@@ -13,6 +13,7 @@ export type ParkingReportAccessRow = {
   status: ParkingStatus;
   phone_revealed: boolean;
   created_at: string;
+  email_sent_at?: string | null;
   acknowledged_at?: string | null;
 };
 
@@ -56,9 +57,9 @@ export function canReporterRevealOwnerPhone(
   if (!report || !userId) return false;
   if (report.reported_by !== userId) return false;
   if (report.status !== "email_sent") return false;
-  const createdMs = getCreatedAtMs(report.created_at);
-  if (!createdMs) return false;
-  return nowMs - createdMs >= 2 * 60 * 1000;
+  const emailSentMs = getCreatedAtMs(String(report.email_sent_at || ""));
+  if (!emailSentMs) return false;
+  return nowMs - emailSentMs >= 1 * 60 * 1000;
 }
 
 export function canReporterMarkUnresolved(

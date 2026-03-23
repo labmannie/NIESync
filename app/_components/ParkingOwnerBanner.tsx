@@ -34,12 +34,12 @@ function formatCountdown(createdAt: string, nowMs: number) {
   return `${mm}:${String(ss).padStart(2, "0")}`;
 }
 
-function formatStageTwoCountdown(createdAt: string, nowMs: number) {
-  const createdMs = new Date(createdAt).getTime();
-  if (Number.isNaN(createdMs)) return "1:00";
+function formatStageTwoCountdown(emailSentAt: string, nowMs: number) {
+  const emailSentMs = new Date(emailSentAt).getTime();
+  if (Number.isNaN(emailSentMs)) return "1:00";
 
-  const elapsed = Math.floor((nowMs - createdMs) / 1000);
-  const remaining = Math.max(0, 120 - elapsed);
+  const elapsed = Math.floor((nowMs - emailSentMs) / 1000);
+  const remaining = Math.max(0, 60 - elapsed);
   const mm = Math.floor(remaining / 60);
   const ss = remaining % 60;
   return `${mm}:${String(ss).padStart(2, "0")}`;
@@ -178,24 +178,29 @@ export function ParkingOwnerBanner() {
     activeReport.status === "chatting" ||
     activeReport.status === "email_sent";
   const createdAtMs = new Date(activeReport.created_at).getTime();
+  const emailSentAtMs = new Date(String(activeReport.email_sent_at || "")).getTime();
   const elapsedSeconds = Number.isFinite(createdAtMs)
     ? Math.max(0, Math.floor((synchronizedNowMs - createdAtMs) / 1000))
     : 0;
-  const stage = activeReport.status === "email_sent" && elapsedSeconds >= 120
-    ? 3
-    : activeReport.status === "email_sent" || elapsedSeconds >= 60
-      ? 2
-      : 1;
+  const chatClosed = elapsedSeconds >= 60;
+  const hasEmailSentAt = Number.isFinite(emailSentAtMs);
+  const emailCountdownActive = activeReport.status === "email_sent" && hasEmailSentAt;
+  const emailElapsedSeconds = hasEmailSentAt
+    ? Math.max(0, Math.floor((synchronizedNowMs - emailSentAtMs) / 1000))
+    : 0;
+  const stage = emailCountdownActive && emailElapsedSeconds >= 60 ? 3 : chatClosed ? 2 : 1;
   const countdownText = stage === 1
     ? formatCountdown(activeReport.created_at, synchronizedNowMs)
-    : stage === 2
-      ? formatStageTwoCountdown(activeReport.created_at, synchronizedNowMs)
+    : stage === 2 && emailCountdownActive
+      ? formatStageTwoCountdown(String(activeReport.email_sent_at || ""), synchronizedNowMs)
       : "-";
   const stageLabel =
     stage === 1
       ? "Stage 1 - Chat window open"
-      : stage === 2
-        ? "Stage 2 - Email escalation active"
+      : stage === 2 && !emailCountdownActive
+        ? "Stage 2 - Escalation email dispatching"
+        : stage === 2
+          ? "Stage 2 - Email sent, call unlock in 1 minute"
         : "Stage 3 - Reporter can call";
   const stageContainerClass =
     stage === 1

@@ -8,6 +8,7 @@ type SendParkingEmailInput = {
   plate: string;
   location: string;
   resolveUrl: string;
+  photoUrl?: string | null;
 };
 
 let cachedTransporter: nodemailer.Transporter | null = null;
@@ -144,11 +145,13 @@ export async function sendParkingEmail({
   plate,
   location,
   resolveUrl,
+  photoUrl,
 }: SendParkingEmailInput) {
   const safeName = escapeHtml((ownerName || "Vehicle Owner").trim() || "Vehicle Owner");
   const safePlate = escapeHtml(plate.trim());
   const safeLocation = escapeHtml(location.trim());
   const safeResolveUrl = escapeHtml(resolveUrl);
+  const safePhotoUrl = escapeHtml(String(photoUrl || "").trim());
   const logoAttachment = resolveLogoAttachment();
   const logoMarkup = logoAttachment
     ? `<img src="cid:${logoAttachment.cid}" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`
@@ -158,6 +161,16 @@ export async function sendParkingEmail({
   const { user: smtpUser, primary, fallback } = getTransporters();
   const preferredFrom = process.env.PARKING_FROM_EMAIL || `NIE Campus Sync <${smtpUser}>`;
   const authenticatedFrom = `NIE Campus Sync <${smtpUser}>`;
+  const photoSection = safePhotoUrl
+    ? `
+                <tr>
+                  <td style="padding:14px 28px 0;">
+                    <p class="muted" style="margin:0 0 8px;font-size:11px;line-height:1.5;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#586274;">Incident photo</p>
+                    <img src="${safePhotoUrl}" alt="Reported incident photo" style="display:block;max-width:100%;height:auto;border-radius:12px;border:1px solid #e5eaf3;" />
+                  </td>
+                </tr>
+      `
+    : "";
 
   const html = `
     <!doctype html>
@@ -221,6 +234,7 @@ export async function sendParkingEmail({
                     </table>
                   </td>
                 </tr>
+                ${photoSection}
                 <tr>
                   <td style="padding:18px 28px 0;">
                     <a href="${safeResolveUrl}" style="display:inline-block;padding:13px 22px;border-radius:10px;background:#FFB000;color:#050505;font-size:14px;font-weight:900;letter-spacing:.01em;text-decoration:none;">Confirm Vehicle Moved</a>

@@ -23,6 +23,11 @@ export type ParkingEscalationSummary = {
   scanned: number;
   escalated: number;
   autoResolved: number;
+  emailSendStats: {
+    count: number;
+    avgMs: number;
+    maxMs: number;
+  };
   failures: Array<{ reportId: string; error: string }>;
 };
 
@@ -87,7 +92,7 @@ function normalizeBaseUrl(value: string) {
   return trimmed;
 }
 
-type EscalateRowResult = { escalated: boolean; error?: string };
+type EscalateRowResult = { escalated: boolean; error?: string; sendMs?: number };
 
 async function releaseStaleDispatchLocks(supabase: ReturnType<typeof getSupabaseAdminClient>) {
   await supabase
@@ -222,7 +227,9 @@ async function escalateReportRow(
     }
 
     const resolveUrl = `${appBaseUrl}/resolve/${report.id}/${report.resolve_token}`;
+    let sendMs = 0;
     try {
+      const sendStartedAt = Date.now();
       await sendParkingEmail({
         toEmail: ownerEmail,
         ownerName,
@@ -231,6 +238,7 @@ async function escalateReportRow(
         resolveUrl,
         photoUrl: photoSignedUrl || null,
       });
+      sendMs = Date.now() - sendStartedAt;
     } catch (error) {
       await supabase
         .from("parking_reports")
@@ -282,7 +290,7 @@ async function escalateReportRow(
       return { escalated: false, error: messageError.message || "Failed to insert escalation message." };
     }
 
-    return { escalated: true };
+    return { escalated: true, sendMs };
   } catch (error) {
     return {
       escalated: false,
@@ -332,13 +340,25 @@ export async function runParkingEscalation(appBaseUrl: string): Promise<ParkingE
     scanned: reports?.length || 0,
     escalated: 0,
     autoResolved,
+    emailSendStats: {
+      count: 0,
+      avgMs: 0,
+      maxMs: 0,
+    },
     failures: [],
   };
+
+  let emailSendTotalMs = 0;
 
   for (const report of (reports || []) as EscalationReportRow[]) {
     const result = await escalateReportRow(supabase, report, normalizedBaseUrl);
     if (result.escalated) {
       summary.escalated += 1;
+      if (typeof result.sendMs === "number") {
+        summary.emailSendStats.count += 1;
+        emailSendTotalMs += result.sendMs;
+        summary.emailSendStats.maxMs = Math.max(summary.emailSendStats.maxMs, result.sendMs);
+      }
       continue;
     }
 
@@ -348,6 +368,10 @@ export async function runParkingEscalation(appBaseUrl: string): Promise<ParkingE
         error: result.error,
       });
     }
+  }
+
+  if (summary.emailSendStats.count > 0) {
+    summary.emailSendStats.avgMs = Math.round(emailSendTotalMs / summary.emailSendStats.count);
   }
 
   return summary;

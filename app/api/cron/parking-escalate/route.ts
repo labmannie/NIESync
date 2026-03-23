@@ -32,9 +32,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const startedAt = Date.now();
     const appBaseUrl = resolveAppBaseUrl(request);
     const summary = await runParkingEscalation(appBaseUrl);
-    return NextResponse.json(summary, { status: 200 });
+    return NextResponse.json(
+      {
+        ...summary,
+        durationMs: Date.now() - startedAt,
+      },
+      { status: 200 }
+    );
   } catch (error) {
     return NextResponse.json(
       {

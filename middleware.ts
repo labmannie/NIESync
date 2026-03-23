@@ -1,16 +1,30 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-import { updateSession } from '@/utils/supabase/middleware';
+import { updateSessionWithOptions } from '@/utils/supabase/middleware';
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const protectedRoutes = ['/lost-and-found', '/parking-patrol', '/leaderboard', '/profile'];
+  const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
+  const shouldIncludeProfileChecks =
+    isProtectedRoute || pathname.startsWith('/login') || pathname.startsWith('/signup');
+  const shouldTrackSessionDevice =
+    isProtectedRoute ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/signup') ||
+    pathname.startsWith('/auth/callback');
+
   let sessionState:
-    | Awaited<ReturnType<typeof updateSession>>
+    | Awaited<ReturnType<typeof updateSessionWithOptions>>
     | null = null;
 
   try {
     // Let the Supabase SSR middleware handle session cookie refresh and fetch user.
-    sessionState = await updateSession(request);
+    sessionState = await updateSessionWithOptions(request, {
+      includeProfile: shouldIncludeProfileChecks,
+      includeSessionTracking: shouldTrackSessionDevice,
+    });
   } catch (error) {
     console.error('middleware updateSession failed:', error);
     return NextResponse.next({
@@ -22,10 +36,6 @@ export async function middleware(request: NextRequest) {
 
   const { response, user, hasProfile, needsOnboarding, sessionRevoked, authLookupFailed } =
     sessionState;
-  
-  const { pathname } = request.nextUrl;
-  const protectedRoutes = ['/lost-and-found', '/parking-patrol', '/leaderboard', '/profile'];
-  const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
 
   if (
     sessionRevoked &&

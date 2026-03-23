@@ -13,6 +13,7 @@ type SendParkingEmailInput = {
 
 let cachedTransporter: nodemailer.Transporter | null = null;
 let cachedFallbackTransporter: nodemailer.Transporter | null = null;
+let preferredTransport: "primary" | "fallback" = "primary";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -35,15 +36,49 @@ function getZohoSmtpHost(emailDomain: string) {
   return "smtp.zoho.com";
 }
 
+function parseBooleanEnv(value: string | undefined, fallback: boolean) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function parseNumberEnv(value: string | undefined, fallback: number) {
+  const parsed = Number(String(value || "").trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function resolveTransportPlan(): TransportPlan {
   const smtpUser = requireEnv("GMAIL_USER").trim();
   const smtpPassword = requireEnv("GMAIL_APP_PASSWORD").trim();
   const emailDomain = smtpUser.split("@")[1]?.toLowerCase() || "";
+  const explicitSmtpHost = String(process.env.SMTP_HOST || "").trim();
+  const explicitSmtpPort = parseNumberEnv(process.env.SMTP_PORT, 465);
+  const explicitSmtpSecure = parseBooleanEnv(process.env.SMTP_SECURE, explicitSmtpPort === 465);
   const baseTimeoutConfig = {
-    connectionTimeout: 7000,
-    greetingTimeout: 7000,
-    socketTimeout: 12000,
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 120,
+    connectionTimeout: 5000,
+    greetingTimeout: 5000,
+    socketTimeout: 10000,
+    dnsTimeout: 5000,
   };
+
+  if (explicitSmtpHost) {
+    return {
+      user: smtpUser,
+      primary: {
+        host: explicitSmtpHost,
+        port: explicitSmtpPort,
+        secure: explicitSmtpSecure,
+        ...baseTimeoutConfig,
+        auth: {
+          user: smtpUser,
+          pass: smtpPassword,
+        },
+      },
+    };
+  }
 
   if (emailDomain === "gmail.com" || emailDomain === "googlemail.com") {
     return {
@@ -285,7 +320,10 @@ export async function sendParkingEmail({
   const attachments = logoAttachment ? [logoAttachment] : [];
   let lastError: unknown = null;
 
-  const sendUsingTransporter = async (transporter: nodemailer.Transporter) => {
+  const sendUsingTransporter = async (
+    transporter: nodemailer.Transporter,
+    source: "primary" | "fallback"
+  ) => {
     try {
       await transporter.sendMail({
         from: authenticatedFrom,
@@ -294,6 +332,7 @@ export async function sendParkingEmail({
         html,
         attachments,
       });
+      preferredTransport = source;
       return true;
     } catch (error) {
       lastError = error;
@@ -301,12 +340,21 @@ export async function sendParkingEmail({
     }
   };
 
-  const sentWithPrimary = await sendUsingTransporter(primary);
-  if (sentWithPrimary) return;
+  const candidates: Array<{ source: "primary" | "fallback"; transporter: nodemailer.Transporter }> =
+    preferredTransport === "fallback" && fallback && fallback !== primary
+      ? [
+          { source: "fallback", transporter: fallback },
+          { source: "primary", transporter: primary },
+        ]
+      : [{ source: "primary", transporter: primary }];
 
-  if (fallback && fallback !== primary) {
-    const sentWithFallback = await sendUsingTransporter(fallback);
-    if (sentWithFallback) return;
+  if (fallback && fallback !== primary && candidates.every((item) => item.source !== "fallback")) {
+    candidates.push({ source: "fallback", transporter: fallback });
+  }
+
+  for (const candidate of candidates) {
+    const sent = await sendUsingTransporter(candidate.transporter, candidate.source);
+    if (sent) return;
   }
 
   if (lastError instanceof Error) {

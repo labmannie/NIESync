@@ -40,6 +40,20 @@ function getRequestLocation(request: NextRequest) {
 }
 
 export async function updateSession(request: NextRequest) {
+  return updateSessionWithOptions(request, {});
+}
+
+type UpdateSessionOptions = {
+  includeProfile?: boolean;
+  includeSessionTracking?: boolean;
+};
+
+export async function updateSessionWithOptions(
+  request: NextRequest,
+  options: UpdateSessionOptions = {}
+) {
+  const includeProfile = options.includeProfile ?? true;
+  const includeSessionTracking = options.includeSessionTracking ?? true;
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -96,12 +110,12 @@ export async function updateSession(request: NextRequest) {
   let needsOnboarding = false;
   let sessionRevoked = false;
 
-  if (user && session?.access_token) {
+  if (includeSessionTracking && user && session?.access_token) {
     const sessionId = extractSessionIdFromJwt(session.access_token);
     if (sessionId) {
       const { data: sessionRow, error: sessionRowError } = await supabase
         .from('auth_session_devices')
-        .select('session_id, revoked_at')
+        .select('session_id, revoked_at, last_seen_at, user_agent, ip_address, location_label')
         .eq('user_id', user.id)
         .eq('session_id', sessionId)
         .maybeSingle();
@@ -122,30 +136,41 @@ export async function updateSession(request: NextRequest) {
         const userAgent = request.headers.get('user-agent') || 'Unknown Device';
         const ipAddress = getRequestIp(request);
         const locationLabel = getRequestLocation(request);
+        const lastSeenMs = sessionRow?.last_seen_at
+          ? new Date(String(sessionRow.last_seen_at)).getTime()
+          : 0;
+        const shouldRefreshLastSeen =
+          !lastSeenMs || Date.now() - lastSeenMs >= 5 * 60 * 1000;
+        const shouldWriteDeviceMeta =
+          String(sessionRow?.user_agent || '') !== String(userAgent || '') ||
+          String(sessionRow?.ip_address || '') !== String(ipAddress || '') ||
+          String(sessionRow?.location_label || '') !== String(locationLabel || '');
 
-        const { error: upsertSessionError } = await supabase
-          .from('auth_session_devices')
-          .upsert(
-            {
-              user_id: user.id,
-              session_id: sessionId,
-              user_agent: userAgent,
-              ip_address: ipAddress,
-              location_label: locationLabel,
-              last_seen_at: new Date().toISOString(),
-              revoked_at: null,
-            },
-            { onConflict: 'session_id' }
-          );
+        if (!sessionRow || shouldRefreshLastSeen || shouldWriteDeviceMeta) {
+          const { error: upsertSessionError } = await supabase
+            .from('auth_session_devices')
+            .upsert(
+              {
+                user_id: user.id,
+                session_id: sessionId,
+                user_agent: userAgent,
+                ip_address: ipAddress,
+                location_label: locationLabel,
+                last_seen_at: new Date().toISOString(),
+                revoked_at: null,
+              },
+              { onConflict: 'session_id' }
+            );
 
-        if (upsertSessionError && upsertSessionError.code !== '42P01') {
-          console.error('Session tracking write failed:', upsertSessionError.message);
+          if (upsertSessionError && upsertSessionError.code !== '42P01') {
+            console.error('Session tracking write failed:', upsertSessionError.message);
+          }
         }
       }
     }
   }
 
-  if (user) {
+  if (includeProfile && user) {
     try {
       const { data: profile, error: profileError } = await supabase
         .from('profiles')

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  canReporterCancelReport,
   canOwnerAcknowledgeReport,
   canReporterMarkUnresolved,
   canReporterResolveReport,
@@ -149,6 +150,25 @@ function runTests() {
       "reporter-id",
       NOW
     ),
+    false
+  );
+
+  assert.equal(canReporterCancelReport(makeReport({ status: "pending" }), "reporter-id", NOW), true);
+  assert.equal(canReporterCancelReport(makeReport({ status: "chatting" }), "reporter-id", NOW), true);
+  assert.equal(
+    canReporterCancelReport(
+      makeReport({ status: "chatting", created_at: new Date(NOW - 61 * 1000).toISOString() }),
+      "reporter-id",
+      NOW
+    ),
+    false
+  );
+  assert.equal(
+    canReporterCancelReport(makeReport({ status: "email_sent" }), "reporter-id", NOW),
+    false
+  );
+  assert.equal(
+    canReporterCancelReport(makeReport({ status: "pending" }), "another-user", NOW),
     false
   );
 

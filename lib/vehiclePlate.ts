@@ -3,7 +3,6 @@ const BH_SERIES_OWNER_PLATE_REGEX = /^\d{2}-BH-\d{4}-[A-HJ-NP-Z]{1,2}$/;
 const IN_SERIES_OWNER_PLATE_REGEX = /^\d{2}-IN-[A-Z]{2}-\d{4}$/;
 const VA_SERIES_OWNER_PLATE_REGEX = /^[A-Z]{2}-VA-[A-Z]{2}-\d{4}$/;
 
-const REPORT_FALLBACK_PLATE_REGEX = /^[A-Z0-9]{6,14}$/;
 const ALNUM_REGEX = /^[A-Z0-9]$/;
 const OCR_NUMERIC_FIX_REGEX = /[OIQDL]/g;
 
@@ -288,31 +287,24 @@ export function validateParkingReportPlate(
     };
   }
 
-  const ownerValidation = validateOwnerVehiclePlate(value, { required: true });
-  if (!ownerValidation.error) {
-    return {
-      plate: ownerValidation.plate,
-      normalizedPlate: ownerValidation.normalizedPlate,
-      isStrictOwnerMatch: true,
-      error: "",
-    };
-  }
-
-  if (!REPORT_FALLBACK_PLATE_REGEX.test(normalized)) {
+  const ownerValidation = validateOwnerVehiclePlate(value, {
+    required: true,
+    requiredMessage: options.requiredMessage || "Vehicle number is required.",
+    invalidMessage: options.invalidMessage || PLATE_FORMAT_HELP_TEXT,
+  });
+  if (ownerValidation.error) {
     return {
       plate: "",
       normalizedPlate: normalized,
       isStrictOwnerMatch: false,
-      error:
-        options.invalidMessage ||
-        "Enter a valid plate (letters and numbers, 6 to 14 characters).",
+      error: ownerValidation.error,
     };
   }
 
   return {
-    plate: normalized,
-    normalizedPlate: normalized,
-    isStrictOwnerMatch: false,
+    plate: ownerValidation.plate,
+    normalizedPlate: ownerValidation.normalizedPlate,
+    isStrictOwnerMatch: true,
     error: "",
   };
 }
@@ -380,5 +372,4 @@ export {
   BH_SERIES_OWNER_PLATE_REGEX,
   IN_SERIES_OWNER_PLATE_REGEX,
   VA_SERIES_OWNER_PLATE_REGEX,
-  REPORT_FALLBACK_PLATE_REGEX,
 };

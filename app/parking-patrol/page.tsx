@@ -17,12 +17,14 @@ import {
 import { createClient } from "@/utils/supabase/client";
 import {
   formatParkingReportPlateInput,
+  getOwnerVehiclePlateFormatsHint,
   normalizeParkingReportPlateForSubmission,
   validateParkingReportPlate,
 } from "@/lib/vehiclePlate";
 import {
   getParkingIncidentPhotoUrlAction,
   ownerImMovingAction,
+  reporterCancelReportAction,
   reporterMarkUnresolvedAction,
   reporterMarkResolvedAction,
   revealParkingPhoneAction,
@@ -30,6 +32,7 @@ import {
   submitParkingReportAction,
 } from "@/app/parking-patrol/actions";
 import {
+  canReporterCancelReport,
   canOwnerAcknowledgeReport,
   canReporterMarkUnresolved,
   canReporterResolveReport,
@@ -99,6 +102,7 @@ const COMMON_LOCATION_ZONES = [
 const LOCATION_OPTIONS = [...COMMON_LOCATION_ZONES, "Other"];
 const CHAT_WINDOW_SECONDS = 60;
 const EMAIL_TO_CALL_SECONDS = 60;
+const LOCATION_DESCRIPTION_MAX_LENGTH = 180;
 
 const STATUS_THEME: Record<ParkingStatus, string> = {
   pending: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
@@ -294,6 +298,281 @@ function buildUnmatchedCopyText(report: UnmatchedReportSnapshot) {
   ].join("\n");
 }
 
+function escapePrintableHtml(value: string) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildUnmatchedReportHtml(report: UnmatchedReportSnapshot, appBaseUrl: string) {
+  const shortId = (String(report.reportId || "").slice(0, 8).toUpperCase() || "UNKNOWN");
+  const reportedAtText = new Date(report.reportedAtIso).toLocaleString();
+  const generatedAtText = new Date().toLocaleString();
+  const safePlate = escapePrintableHtml(report.plate);
+  const safeLocation = escapePrintableHtml(report.location);
+  const safeReportId = escapePrintableHtml(shortId);
+  const safeReportedAtText = escapePrintableHtml(reportedAtText);
+  const safeGeneratedAtText = escapePrintableHtml(generatedAtText);
+  const logoUrl = `${appBaseUrl}/logo.png`;
+  const faqUrl = `${appBaseUrl}/faq`;
+  const termsUrl = `${appBaseUrl}/terms-of-service`;
+  const privacyUrl = `${appBaseUrl}/privacy-policy`;
+
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>NIE Sync Parking Incident Report</title>
+        <style>
+          :root {
+            --bg: #f6f8fc;
+            --card: #ffffff;
+            --ink: #111827;
+            --muted: #6b7280;
+            --line: #e5e7eb;
+            --amber: #f5a623;
+            --emerald: #22c55e;
+            --sky: #0ea5e9;
+          }
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            font-family: "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--ink);
+            background: radial-gradient(circle at top right, #fff4da 0%, var(--bg) 42%);
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .page {
+            max-width: 920px;
+            margin: 0 auto;
+            padding: 28px 18px;
+          }
+          .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+            overflow: hidden;
+          }
+          .hero {
+            background: linear-gradient(120deg, #0f172a 0%, #111827 42%, #1f2937 100%);
+            color: #fff;
+            padding: 22px 24px;
+          }
+          .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+          }
+          .brand-logo {
+            width: 52px;
+            height: 52px;
+            border-radius: 12px;
+            background: #fff;
+            border: 1px solid rgba(255,255,255,0.25);
+            object-fit: contain;
+            padding: 6px;
+          }
+          .kicker {
+            margin: 0;
+            color: #f8cc75;
+            font-size: 11px;
+            letter-spacing: .16em;
+            text-transform: uppercase;
+            font-weight: 800;
+          }
+          .title {
+            margin: 4px 0 0;
+            font-size: 24px;
+            font-weight: 900;
+            line-height: 1.2;
+          }
+          .subtitle {
+            margin: 10px 0 0;
+            color: #cbd5e1;
+            font-size: 13px;
+            line-height: 1.6;
+          }
+          .section {
+            padding: 22px 24px 2px;
+          }
+          .section-title {
+            margin: 0 0 14px;
+            font-size: 11px;
+            letter-spacing: .16em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: 800;
+          }
+          .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+          }
+          .item {
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 12px 13px;
+            background: #fafafa;
+          }
+          .item-label {
+            margin: 0;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: .12em;
+            color: var(--muted);
+            font-weight: 700;
+          }
+          .item-value {
+            margin: 6px 0 0;
+            font-size: 16px;
+            line-height: 1.35;
+            font-weight: 800;
+            color: var(--ink);
+            word-break: break-word;
+          }
+          .plate {
+            font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+            color: #b7791f;
+            letter-spacing: .06em;
+          }
+          .banner {
+            margin: 18px 24px 2px;
+            border: 1px dashed rgba(245, 166, 35, 0.5);
+            background: linear-gradient(135deg, rgba(245,166,35,0.11), rgba(14,165,233,0.08));
+            border-radius: 14px;
+            padding: 14px 14px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #374151;
+          }
+          .actions {
+            margin: 16px 24px 0;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 14px 16px;
+            background: #fff;
+          }
+          .actions h3 {
+            margin: 0 0 10px;
+            font-size: 12px;
+            letter-spacing: .14em;
+            text-transform: uppercase;
+            color: var(--muted);
+          }
+          .actions ul {
+            margin: 0;
+            padding-left: 20px;
+            color: #374151;
+            font-size: 13px;
+            line-height: 1.8;
+          }
+          .footer {
+            padding: 18px 24px 24px;
+          }
+          .meta {
+            margin: 0;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.7;
+          }
+          .links {
+            margin-top: 10px;
+            font-size: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+          }
+          .links a {
+            color: #0284c7;
+            text-decoration: none;
+            font-weight: 700;
+          }
+          .dot {
+            color: #94a3b8;
+          }
+          @media (max-width: 640px) {
+            .hero, .section, .footer { padding-left: 16px; padding-right: 16px; }
+            .banner, .actions { margin-left: 16px; margin-right: 16px; }
+            .grid { grid-template-columns: 1fr; }
+            .title { font-size: 20px; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="page">
+          <article class="card">
+            <header class="hero">
+              <div class="brand">
+                <img src="${escapePrintableHtml(logoUrl)}" alt="NIE Sync Logo" class="brand-logo" />
+                <div>
+                  <p class="kicker">NIE Sync</p>
+                  <h1 class="title">Unregistered Vehicle Incident Report</h1>
+                  <p class="subtitle">Generated for manual campus follow-up and parking governance records.</p>
+                </div>
+              </div>
+            </header>
+
+            <section class="section">
+              <p class="section-title">Incident Summary</p>
+              <div class="grid">
+                <div class="item">
+                  <p class="item-label">Vehicle Plate</p>
+                  <p class="item-value plate">${safePlate}</p>
+                </div>
+                <div class="item">
+                  <p class="item-label">Report ID</p>
+                  <p class="item-value">#${safeReportId}</p>
+                </div>
+                <div class="item">
+                  <p class="item-label">Reported At</p>
+                  <p class="item-value">${safeReportedAtText}</p>
+                </div>
+                <div class="item">
+                  <p class="item-label">Location</p>
+                  <p class="item-value">${safeLocation}</p>
+                </div>
+              </div>
+            </section>
+
+            <div class="banner">
+              This vehicle is not registered in NIE Sync. Please proceed with campus-security workflow or a physical notice and keep this report for traceability.
+            </div>
+
+            <section class="actions">
+              <h3>Recommended Follow-up</h3>
+              <ul>
+                <li>Verify the vehicle physically at the reported location.</li>
+                <li>Place a notice requesting immediate vehicle movement.</li>
+                <li>Escalate to campus security if obstruction persists.</li>
+              </ul>
+            </section>
+
+            <footer class="footer">
+              <p class="meta">Generated: ${safeGeneratedAtText}</p>
+              <p class="meta">System: NIE Sync Parking Patrol</p>
+              <div class="links">
+                <a href="${escapePrintableHtml(faqUrl)}">FAQ</a>
+                <span class="dot">•</span>
+                <a href="${escapePrintableHtml(termsUrl)}">Terms of Service</a>
+                <span class="dot">•</span>
+                <a href="${escapePrintableHtml(privacyUrl)}">Privacy Policy</a>
+              </div>
+            </footer>
+          </article>
+        </div>
+      </body>
+    </html>
+  `.trim();
+}
+
 function getThreadRoleLabel(message: ParkingMessageRow) {
   if (message.sender_role === "system") return "SYSTEM";
   if (message.sender_role === "reporter") return "YOU";
@@ -331,6 +610,9 @@ function ParkingPatrolPageContent() {
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [cancelTargetReportId, setCancelTargetReportId] = useState("");
   const [isMarkingUnresolved, setIsMarkingUnresolved] = useState(false);
   const [isCallingOwner, setIsCallingOwner] = useState(false);
   const [revealedPhoneByReport, setRevealedPhoneByReport] = useState<Record<string, string>>(
@@ -554,6 +836,7 @@ function ParkingPatrolPageContent() {
 
   const canOwnerAcknowledge = canOwnerAcknowledgeReport(selectedReport, userId);
   const canReporterResolve = canReporterResolveReport(selectedReport, userId);
+  const canCancelReport = canReporterCancelReport(selectedReport, userId, synchronizedNowMs);
   const canMarkUnresolved = canReporterMarkUnresolved(selectedReport, userId, synchronizedNowMs);
   const canCallOwner = canReporterRevealOwnerPhone(selectedReport, userId, synchronizedNowMs);
   const ownerPhone = selectedReport ? revealedPhoneByReport[selectedReport.id] || "" : "";
@@ -691,6 +974,11 @@ function ParkingPatrolPageContent() {
       return;
     }
 
+    if (locationValue.length > LOCATION_DESCRIPTION_MAX_LENGTH) {
+      setSubmitError(`Location description must be ${LOCATION_DESCRIPTION_MAX_LENGTH} characters or less.`);
+      return;
+    }
+
     const plateValidation = validateParkingReportPlate(plateInput);
     if (plateValidation.error) {
       setSubmitError(plateValidation.error);
@@ -761,11 +1049,8 @@ function ParkingPatrolPageContent() {
 
   const handleDownloadUnmatchedPdf = () => {
     if (!unmatchedReport || typeof window === "undefined") return;
-
-    const printable = buildUnmatchedCopyText(unmatchedReport)
-      .split("\n")
-      .map((line) => `<p style="margin:0 0 10px 0;">${line}</p>`)
-      .join("");
+    const appBaseUrl = window.location.origin.replace(/\/$/, "");
+    const printable = buildUnmatchedReportHtml(unmatchedReport, appBaseUrl);
 
     const popup = window.open("", "_blank", "width=900,height=900");
     if (!popup) {
@@ -773,24 +1058,12 @@ function ParkingPatrolPageContent() {
       return;
     }
 
-    popup.document.write(`
-      <html>
-        <head>
-          <title>Parking Incident Report</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
-            h1 { font-size: 20px; margin-bottom: 16px; }
-          </style>
-        </head>
-        <body>
-          <h1>NIE Sync - Unregistered Vehicle Report</h1>
-          ${printable}
-        </body>
-      </html>
-    `);
+    popup.document.write(printable);
     popup.document.close();
     popup.focus();
-    popup.print();
+    window.setTimeout(() => {
+      popup.print();
+    }, 350);
     setCopyDetailsMessage("Print dialog opened. Choose Save as PDF.");
   };
 
@@ -848,6 +1121,33 @@ function ParkingPatrolPageContent() {
 
     await loadReports();
     await loadMessages(selectedReport.id);
+  };
+
+  const handleReporterCancel = async () => {
+    if (!cancelTargetReportId) return;
+
+    setIsCancelling(true);
+    setThreadActionError("");
+
+    const result = await reporterCancelReportAction(cancelTargetReportId);
+    setIsCancelling(false);
+
+    if (!result.ok) {
+      setThreadActionError(result.error || "Unable to cancel this report.");
+      return;
+    }
+
+    setCancelConfirmOpen(false);
+    setCancelTargetReportId("");
+    setThreadDraft("");
+    await loadReports();
+    setMessages([]);
+  };
+
+  const openCancelConfirmation = () => {
+    if (!selectedReport) return;
+    setCancelTargetReportId(selectedReport.id);
+    setCancelConfirmOpen(true);
   };
 
   const handleReporterMarkUnresolved = async () => {
@@ -930,7 +1230,7 @@ function ParkingPatrolPageContent() {
 
   return (
     <main className="min-h-screen w-full bg-[#0a0a0a] px-4 py-6 pb-20 pt-32 text-white">
-      <div className="mx-auto w-full max-w-[640px] space-y-3">
+      <div className="mx-auto w-full max-w-[1200px] space-y-3">
         <header
           className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-md"
           style={{
@@ -962,7 +1262,8 @@ function ParkingPatrolPageContent() {
           </div>
         ) : null}
 
-        <section className="space-y-3">
+        <section className="grid gap-3 lg:grid-cols-12 lg:items-start">
+          <div className="space-y-3 lg:col-span-5">
           <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Live Incident</p>
@@ -990,7 +1291,7 @@ function ParkingPatrolPageContent() {
             )}
           </div>
           <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Report Vehicle</p>
                 <p className="mt-1 text-sm text-[#aaa]">Upload, auto-detect plate, and submit in one flow.</p>
@@ -998,7 +1299,7 @@ function ParkingPatrolPageContent() {
               <button
                 type="button"
                 onClick={() => setReportPanelOpen((current) => !current)}
-                className="inline-flex h-12 min-w-[140px] items-center justify-center gap-2 rounded-xl bg-[#f5a623] px-4 text-sm font-bold text-black transition-transform active:scale-95"
+                className="inline-flex h-12 w-full min-w-[140px] items-center justify-center gap-2 rounded-xl bg-[#f5a623] px-4 text-sm font-bold text-black transition-transform active:scale-95 sm:w-auto"
               >
                 <ShieldAlert className="h-4 w-4" />
                 {reportPanelOpen ? "Hide Form" : "Open Form"}
@@ -1017,10 +1318,17 @@ function ParkingPatrolPageContent() {
               </p>
             ) : null}
             {unmatchedReport ? (
-              <div className="mt-3 rounded-2xl border-2 border-dashed border-amber-500/30 bg-amber-500/5 p-4 text-center">
+              <div className="mt-3 rounded-2xl border border-amber-400/35 bg-gradient-to-br from-amber-400/15 via-amber-500/5 to-sky-500/10 p-4 text-center shadow-[0_20px_45px_rgba(8,12,20,0.45)]">
                 <p className="text-3xl">⚠️</p>
-                <p className="mt-2 text-sm font-bold text-white">Vehicle not registered in NIE Sync.</p>
-                <p className="mt-1 text-xs text-[#888]">Share or download details for manual follow-up.</p>
+                <p className="mt-2 text-base font-black tracking-tight text-white">Vehicle not registered in NIE Sync</p>
+                <p className="mt-1 text-xs leading-relaxed text-[#bbb]">
+                  Keep this report for records and use the branded PDF for campus-security follow-up.
+                </p>
+                <div className="mt-3 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-left">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#888]">Incident Snapshot</p>
+                  <p className="mt-1 font-mono text-sm font-black tracking-wider text-[#f5a623]">{unmatchedReport.plate}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-[#aaa]">{unmatchedReport.location}</p>
+                </div>
                 <div className="mt-3 space-y-2">
                   <button
                     type="button"
@@ -1051,12 +1359,16 @@ function ParkingPatrolPageContent() {
                     value={plateInput}
                     onChange={(event) => setPlateInput(formatParkingReportPlateInput(event.target.value))}
                     placeholder="KA-09-AB-1234"
-                    className="mt-2 w-full rounded-xl border border-white/[0.06] bg-[#111] p-4 text-center font-mono text-2xl font-black tracking-widest text-[#f5a623] outline-none focus:border-[#f5a623]/40"
+                    className="mt-2 w-full rounded-xl border border-white/[0.06] bg-[#111] p-4 text-center font-mono text-2xl font-black tracking-widest text-[#f5a623] outline-none placeholder:font-mono placeholder:text-base placeholder:font-bold placeholder:tracking-[0.12em] placeholder:text-[#666] focus:border-[#f5a623]/40"
                   />
+                  <p className="mt-2 text-center text-xs text-[#666]">{getOwnerVehiclePlateFormatsHint()}</p>
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Photo Upload</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Photo Upload (Optional)</p>
+                  <p className="mt-1 text-xs text-[#666]">
+                    Optional. Add a photo for OCR auto-detection and stronger incident context.
+                  </p>
                   <label className="relative mt-2 flex min-h-[160px] w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-white/10 bg-white/[0.02] p-6 transition-colors active:border-[#f5a623]/40">
                     <input
                       type="file"
@@ -1090,7 +1402,7 @@ function ParkingPatrolPageContent() {
                       <>
                         <Camera className="h-8 w-8 text-[#555]" />
                         <p className="text-sm text-[#888]">{isRunningOcr ? "Extracting plate..." : "Tap to capture or upload"}</p>
-                        <p className="text-xs text-[#555]">Photo will be compressed automatically</p>
+                        <p className="text-xs text-[#555]">Optional · photo will be compressed automatically</p>
                       </>
                     )}
                   </label>
@@ -1142,13 +1454,23 @@ function ParkingPatrolPageContent() {
                     })}
                   </div>
                   {selectedLocationChip === "Other" ? (
-                    <textarea
-                      value={locationInput}
-                      onChange={(event) => setLocationInput(event.target.value)}
-                      placeholder="Describe exact location"
-                      rows={3}
-                      className="mt-2 w-full rounded-xl border border-white/[0.06] bg-[#111] p-3 text-sm text-white outline-none placeholder:text-[#444] focus:border-[#f5a623]/40"
-                    />
+                    <>
+                      <textarea
+                        value={locationInput}
+                        onChange={(event) =>
+                          setLocationInput(
+                            String(event.target.value || "").slice(0, LOCATION_DESCRIPTION_MAX_LENGTH)
+                          )
+                        }
+                        placeholder="Describe exact location"
+                        rows={3}
+                        maxLength={LOCATION_DESCRIPTION_MAX_LENGTH}
+                        className="mt-2 w-full resize-none rounded-xl border border-white/[0.06] bg-[#111] p-3 text-sm text-white outline-none placeholder:text-[#444] focus:border-[#f5a623]/40"
+                      />
+                      <p className="mt-1 text-right text-[10px] text-[#666]">
+                        {locationInput.length}/{LOCATION_DESCRIPTION_MAX_LENGTH}
+                      </p>
+                    </>
                   ) : null}
                 </div>
 
@@ -1164,8 +1486,9 @@ function ParkingPatrolPageContent() {
               </div>
             ) : null}
           </div>
+          </div>
 
-          <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4">
+          <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4 lg:col-span-7 lg:min-h-[900px]">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Live Incident Thread</h2>
                 {selectedReport ? (
@@ -1317,6 +1640,17 @@ function ParkingPatrolPageContent() {
                       </button>
                     ) : null}
 
+                    {isReporter && canCancelReport ? (
+                      <button
+                        type="button"
+                        onClick={openCancelConfirmation}
+                        disabled={isCancelling}
+                        className="h-12 w-full rounded-xl border border-red-500/35 bg-red-500/10 text-sm font-bold text-red-300 transition-transform active:scale-95 disabled:opacity-60"
+                      >
+                        {isCancelling ? "Cancelling..." : "Cancel Report"}
+                      </button>
+                    ) : null}
+
                     {isReporter && selectedReport.status === "acknowledged" ? (
                       canMarkUnresolved ? (
                         <button
@@ -1461,6 +1795,43 @@ function ParkingPatrolPageContent() {
             )}
             </div>
           </section>
+
+          {cancelConfirmOpen ? (
+            <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/65 p-4 sm:items-center">
+              <div className="w-full max-w-md rounded-2xl border border-white/[0.08] bg-[#111] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Cancel Report</p>
+                <h3 className="mt-2 text-lg font-black tracking-tight text-white">
+                  Cancel this incident report?
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[#aaa]">
+                  This is allowed only during Stage 1 (first 1 minute). Once cancelled, this report
+                  will be closed.
+                </p>
+                <div className="mt-4 space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleReporterCancel}
+                    disabled={isCancelling}
+                    className="h-12 w-full rounded-xl bg-[#ef4444] text-sm font-bold text-white transition-transform active:scale-95 disabled:opacity-60"
+                  >
+                    {isCancelling ? "Cancelling..." : "Yes, Cancel Report"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isCancelling) return;
+                      setCancelConfirmOpen(false);
+                      setCancelTargetReportId("");
+                    }}
+                    disabled={isCancelling}
+                    className="h-12 w-full rounded-xl border border-white/10 bg-transparent text-sm font-bold text-[#aaa] transition-transform active:scale-95 disabled:opacity-60"
+                  >
+                    Keep Report Active
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
       </div>
     </main>
   );
@@ -1471,10 +1842,15 @@ export default function ParkingPatrolPage() {
     <Suspense
       fallback={
         <main className="min-h-screen w-full bg-[#0a0a0a] px-4 py-6 pb-20 pt-32 text-white">
-          <div className="mx-auto w-full max-w-[640px] animate-pulse space-y-3">
+          <div className="mx-auto w-full max-w-[1200px] animate-pulse space-y-3">
             <div className="h-40 rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
-            <div className="h-96 rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
-            <div className="h-80 rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
+            <div className="grid gap-3 lg:grid-cols-12">
+              <div className="space-y-3 lg:col-span-5">
+                <div className="h-44 rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
+                <div className="h-[28rem] rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
+              </div>
+              <div className="h-[52rem] rounded-2xl border border-white/[0.06] bg-white/[0.03] lg:col-span-7" />
+            </div>
           </div>
         </main>
       }

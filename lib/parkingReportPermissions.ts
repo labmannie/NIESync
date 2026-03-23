@@ -74,3 +74,14 @@ export function canReporterMarkUnresolved(
   if (!acknowledgedAtMs) return false;
   return nowMs - acknowledgedAtMs >= 5 * 60 * 1000;
 }
+
+export function canReporterCancelReport(
+  report: ParkingReportAccessRow | null,
+  userId: string,
+  nowMs = Date.now()
+) {
+  if (!report || !userId) return false;
+  if (report.reported_by !== userId) return false;
+  if (!["pending", "chatting"].includes(report.status)) return false;
+  return isChatWindowOpen(report, nowMs);
+}

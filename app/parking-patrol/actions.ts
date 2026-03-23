@@ -6,6 +6,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
 import { normalizeParkingReportPlateForSubmission } from "@/lib/vehiclePlate";
 
 const INCIDENT_PHOTOS_BUCKET = "incident-photos";
+const LOCATION_DESCRIPTION_MAX_LENGTH = 180;
 const INCIDENT_PHOTO_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -52,6 +53,12 @@ function mapThreadActionError(message: string) {
   }
   if (normalized.includes("reopened at most 2 times")) {
     return "You have reached the reopen limit for this report (max 2 times).";
+  }
+  if (normalized.includes("report can be cancelled only during first minute")) {
+    return "You can cancel only during Stage 1 (the first 1 minute).";
+  }
+  if (normalized.includes("report cannot be cancelled")) {
+    return "This report cannot be cancelled right now.";
   }
   return message || "Unable to complete this action.";
 }
@@ -165,6 +172,13 @@ export async function submitParkingReportAction(
     return { ok: false, error: "Location description is required." };
   }
 
+  if (locationDescription.length > LOCATION_DESCRIPTION_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `Location description must be ${LOCATION_DESCRIPTION_MAX_LENGTH} characters or less.`,
+    };
+  }
+
   const normalizedPlate = normalizeParkingReportPlateForSubmission({
     manualPlate,
     ocrRawText,
@@ -250,6 +264,21 @@ export async function reporterMarkUnresolvedAction(reportId: string): Promise<Ba
     return {
       ok: false,
       error: mapThreadActionError(error.message || "Unable to reopen this report."),
+    };
+  }
+  return { ok: true };
+}
+
+export async function reporterCancelReportAction(reportId: string): Promise<BasicActionResult> {
+  const supabase = await createServerClient();
+  const { error } = await supabase.rpc("parking_reporter_cancel", {
+    _report_id: reportId,
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      error: mapThreadActionError(error.message || "Unable to cancel this report."),
     };
   }
   return { ok: true };

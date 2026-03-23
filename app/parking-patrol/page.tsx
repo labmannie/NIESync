@@ -6,16 +6,13 @@ import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Camera,
-  CheckCircle2,
-  Clock3,
-  Copy,
   Download,
   Loader2,
   PhoneCall,
-  RadioTower,
   Send,
   ShieldAlert,
   UploadCloud,
+  X,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -24,7 +21,6 @@ import {
   validateParkingReportPlate,
 } from "@/lib/vehiclePlate";
 import {
-  ensureParkingEscalationAction,
   ownerImMovingAction,
   reporterMarkUnresolvedAction,
   reporterMarkResolvedAction,
@@ -99,14 +95,18 @@ const COMMON_LOCATION_ZONES = [
   "ECE Block Side Road",
 ];
 
+const LOCATION_OPTIONS = [...COMMON_LOCATION_ZONES, "Other"];
+const CHAT_WINDOW_SECONDS = 60;
+const PHONE_REVEAL_SECONDS = 120;
+
 const STATUS_THEME: Record<ParkingStatus, string> = {
-  pending: "border-yellow-400/35 bg-yellow-500/15 text-yellow-200",
-  chatting: "border-blue-400/35 bg-blue-500/15 text-blue-200",
-  acknowledged: "border-emerald-400/35 bg-emerald-500/15 text-emerald-200",
-  email_sent: "border-indigo-400/35 bg-indigo-500/15 text-indigo-200",
-  resolved: "border-green-400/35 bg-green-500/15 text-green-200",
-  unmatched: "border-slate-400/35 bg-slate-500/15 text-slate-200",
-  expired: "border-red-400/35 bg-red-500/15 text-red-200",
+  pending: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
+  chatting: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
+  acknowledged: "bg-green-500/10 text-green-400 border border-green-500/20",
+  email_sent: "bg-blue-500/10 text-blue-400 border border-blue-500/20",
+  resolved: "bg-green-500/10 text-green-400 border border-green-500/20",
+  unmatched: "bg-red-500/10 text-red-400 border border-red-500/20",
+  expired: "bg-red-500/10 text-red-400 border border-red-500/20",
 };
 
 let tesseractScriptPromise: Promise<TesseractRecognizer> | null = null;
@@ -147,6 +147,30 @@ function loadTesseractRecognizer() {
   return tesseractScriptPromise;
 }
 
+async function compressImage(file: File): Promise<Blob> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const MAX = 1200;
+      let w = img.width;
+      let h = img.height;
+      if (w > MAX) {
+        h = Math.round((h * MAX) / w);
+        w = MAX;
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => resolve(blob!), "image/jpeg", 0.75);
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  });
+}
+
 function formatElapsed(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "just now";
@@ -159,14 +183,65 @@ function formatElapsed(value: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function formatTwoMinuteCountdown(createdAt: string, nowMs: number) {
+function getElapsedSeconds(createdAt: string, nowMs: number) {
   const startedMs = new Date(createdAt).getTime();
-  if (Number.isNaN(startedMs)) return "2:00";
-  const elapsed = Math.floor((nowMs - startedMs) / 1000);
-  const remaining = Math.max(0, 120 - elapsed);
-  const mm = Math.floor(remaining / 60);
-  const ss = remaining % 60;
+  if (!Number.isFinite(startedMs)) return 0;
+  return Math.max(0, Math.floor((nowMs - startedMs) / 1000));
+}
+
+function formatCountdown(seconds: number) {
+  if (seconds <= 0) return "—";
+  const mm = Math.floor(seconds / 60);
+  const ss = seconds % 60;
   return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+
+function getStage(report: ParkingReportRow | null, nowMs: number) {
+  if (!report) return 1;
+  const elapsed = getElapsedSeconds(report.created_at, nowMs);
+
+  if (report.phone_revealed || elapsed >= PHONE_REVEAL_SECONDS) return 3;
+  if (report.status === "email_sent" || report.email_sent_at || elapsed >= CHAT_WINDOW_SECONDS) {
+    return 2;
+  }
+  return 1;
+}
+
+function getStageCountdown(report: ParkingReportRow | null, nowMs: number) {
+  if (!report) {
+    return { display: "—", label: "LIVE TIMER", progress: 0, ringColor: "#888888" };
+  }
+
+  const elapsed = getElapsedSeconds(report.created_at, nowMs);
+  const stage = getStage(report, nowMs);
+
+  if (stage === 1) {
+    const remaining = Math.max(0, CHAT_WINDOW_SECONDS - elapsed);
+    return {
+      display: formatCountdown(remaining),
+      label: "CHAT WINDOW",
+      progress: Math.min(1, elapsed / CHAT_WINDOW_SECONDS),
+      ringColor: "#22c55e",
+    };
+  }
+
+  if (stage === 2) {
+    const elapsedInStage = Math.max(0, elapsed - CHAT_WINDOW_SECONDS);
+    const remaining = Math.max(0, PHONE_REVEAL_SECONDS - elapsed);
+    return {
+      display: formatCountdown(remaining),
+      label: "PHONE REVEAL",
+      progress: Math.min(1, elapsedInStage / (PHONE_REVEAL_SECONDS - CHAT_WINDOW_SECONDS)),
+      ringColor: "#f5a623",
+    };
+  }
+
+  return {
+    display: "—",
+    label: "CALL READY",
+    progress: 1,
+    ringColor: "#ef4444",
+  };
 }
 
 function formatFiveMinuteCountdown(startedAt: string, nowMs: number) {
@@ -193,15 +268,10 @@ function buildUnmatchedCopyText(report: UnmatchedReportSnapshot) {
   ].join("\n");
 }
 
-function getThreadRoleLabel(
-  message: ParkingMessageRow,
-  isReporter: boolean,
-  isOwner: boolean
-) {
-  if (message.sender_role === "system") return "System";
-  if (isReporter) return message.sender_role === "reporter" ? "You" : "Vehicle Owner";
-  if (isOwner) return message.sender_role === "owner" ? "You" : "Reporter";
-  return message.sender_role === "owner" ? "Vehicle Owner" : "Reporter";
+function getThreadRoleLabel(message: ParkingMessageRow) {
+  if (message.sender_role === "system") return "SYSTEM";
+  if (message.sender_role === "reporter") return "YOU";
+  return "VEHICLE OWNER";
 }
 
 function ParkingPatrolPageContent() {
@@ -223,6 +293,7 @@ function ParkingPatrolPageContent() {
   const [isRunningOcr, setIsRunningOcr] = useState(false);
   const [plateInput, setPlateInput] = useState("");
   const [locationInput, setLocationInput] = useState("");
+  const [selectedLocationChip, setSelectedLocationChip] = useState("Other");
   const [submitMessage, setSubmitMessage] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [copyDetailsMessage, setCopyDetailsMessage] = useState("");
@@ -241,7 +312,7 @@ function ParkingPatrolPageContent() {
   );
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
-  const escalationAttemptByReportRef = useRef<Record<string, number>>({});
+  const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const reportIdFromQuery = searchParams.get("report") || "";
 
@@ -446,7 +517,6 @@ function ParkingPatrolPageContent() {
   const selectedReport = reports.find((report) => report.id === selectedReportId) || null;
   const synchronizedNowMs = clockMs + serverClockOffsetMs;
   const isReporter = selectedReport?.reported_by === userId;
-  const isOwner = selectedReport?.matched_owner_id === userId;
   const chatWindowOpen = isChatWindowOpen(selectedReport, synchronizedNowMs);
   const isChatReadOnly = Boolean(
     !selectedReport ||
@@ -463,61 +533,26 @@ function ParkingPatrolPageContent() {
   const unresolvedCountdown = selectedReport?.acknowledged_at
     ? formatFiveMinuteCountdown(selectedReport.acknowledged_at, synchronizedNowMs)
     : "5:00";
+  const stage = getStage(selectedReport, synchronizedNowMs);
+  const stageCountdown = getStageCountdown(selectedReport, synchronizedNowMs);
+  const stageLineFillPercent = stage === 1 ? 0 : stage === 2 ? 50 : 100;
+  const circleRadius = 52;
+  const circleLength = 2 * Math.PI * circleRadius;
+  const circleOffset = circleLength * (1 - stageCountdown.progress);
 
   useEffect(() => {
-    if (!selectedReport || !isLoggedIn) return;
-    if (!["pending", "chatting"].includes(selectedReport.status)) return;
-    if (selectedReport.email_sent_at) return;
+    if (!messageListRef.current) return;
+    messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+  }, [messages, selectedReport?.id]);
 
-    const createdMs = new Date(selectedReport.created_at).getTime();
-    if (!Number.isFinite(createdMs)) return;
-    if (synchronizedNowMs - createdMs < 2 * 60 * 1000) return;
-
-    const reportId = selectedReport.id;
-    const previousAttempt = escalationAttemptByReportRef.current[reportId] || 0;
-    if (clockMs - previousAttempt < 15000) return;
-    escalationAttemptByReportRef.current[reportId] = clockMs;
-
-    let cancelled = false;
-
-    const ensureEscalation = async () => {
-      const result = await ensureParkingEscalationAction(reportId);
-      if (cancelled) return;
-
-      if (!result.ok) {
-        escalationAttemptByReportRef.current[reportId] = 0;
-        return;
-      }
-
-      if (result.escalated) {
-        await loadReports(false);
-      }
-    };
-
-    void ensureEscalation();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    clockMs,
-    isLoggedIn,
-    loadReports,
-    synchronizedNowMs,
-    selectedReport?.id,
-    selectedReport?.status,
-    selectedReport?.email_sent_at,
-    selectedReport?.created_at,
-  ]);
-
-  const runOcr = async (file: File) => {
+  const runOcr = async (image: Blob) => {
     setIsRunningOcr(true);
     setSubmitError("");
     setSubmitMessage("");
 
     try {
       const recognizer = await loadTesseractRecognizer();
-      const result = await recognizer.recognize(file, "eng");
+      const result = await recognizer.recognize(image, "eng");
 
       const extractedText = String(result?.data?.text || "").trim();
       setOcrRawText(extractedText);
@@ -548,14 +583,28 @@ function ParkingPatrolPageContent() {
   const handlePhotoChange = async (file: File | null) => {
     if (!file) return;
 
+    setSubmitError("");
+    setSubmitMessage("");
+
     if (photoPreview) {
       URL.revokeObjectURL(photoPreview);
     }
 
-    const previewUrl = URL.createObjectURL(file);
-    setPhotoFile(file);
-    setPhotoPreview(previewUrl);
-    await runOcr(file);
+    try {
+      const compressedBlob = await compressImage(file);
+      const compressedFile = new File(
+        [compressedBlob],
+        `${String(file.name || "incident-photo").replace(/\.[^.]+$/, "") || "incident-photo"}.jpg`,
+        { type: "image/jpeg" }
+      );
+
+      const previewUrl = URL.createObjectURL(compressedFile);
+      setPhotoFile(compressedFile);
+      setPhotoPreview(previewUrl);
+      await runOcr(compressedFile);
+    } catch {
+      setSubmitError("Unable to process this photo. Please try a different image.");
+    }
   };
 
   const handleSubmitReport = async () => {
@@ -613,6 +662,7 @@ function ParkingPatrolPageContent() {
 
     setPlateInput("");
     setLocationInput("");
+    setSelectedLocationChip("Other");
     setOcrRawText("");
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoFile(null);
@@ -637,6 +687,41 @@ function ParkingPatrolPageContent() {
     } catch {
       setCopyDetailsMessage("Clipboard is unavailable. Please copy manually.");
     }
+  };
+
+  const handleDownloadUnmatchedPdf = () => {
+    if (!unmatchedReport || typeof window === "undefined") return;
+
+    const printable = buildUnmatchedCopyText(unmatchedReport)
+      .split("\n")
+      .map((line) => `<p style="margin:0 0 10px 0;">${line}</p>`)
+      .join("");
+
+    const popup = window.open("", "_blank", "width=900,height=900");
+    if (!popup) {
+      setCopyDetailsMessage("Popup blocked. Allow popups to save as PDF.");
+      return;
+    }
+
+    popup.document.write(`
+      <html>
+        <head>
+          <title>Parking Incident Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+            h1 { font-size: 20px; margin-bottom: 16px; }
+          </style>
+        </head>
+        <body>
+          <h1>NIE Sync - Unregistered Vehicle Report</h1>
+          ${printable}
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+    setCopyDetailsMessage("Print dialog opened. Choose Save as PDF.");
   };
 
   const handleSendThreadMessage = async () => {
@@ -754,7 +839,7 @@ function ParkingPatrolPageContent() {
     ];
 
     const body = messages.map((message) => {
-      const label = getThreadRoleLabel(message, Boolean(isReporter), Boolean(isOwner));
+      const label = getThreadRoleLabel(message);
       return `[${new Date(message.created_at).toLocaleString()}] ${label}: ${message.message}`;
     });
 
@@ -774,224 +859,249 @@ function ParkingPatrolPageContent() {
   };
 
   return (
-    <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
-      <div className="mx-auto w-full max-w-7xl">
-        <header className="mb-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h1 className="mt-1 text-2xl font-black tracking-tight md:text-4xl">
-                Parking Patrol
-              </h1>
-              <p className="mt-2 max-w-3xl text-sm text-text-secondary md:text-base">
-                Live reporting and live chat operations for parking incidents.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
-                <RadioTower className="h-4 w-4 text-accent-amber" />
-                Live Incident Channel
-              </div>
-              <Link
-                href="/profile/reports"
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20"
-              >
-                History Archive
-              </Link>
-            </div>
+    <main className="min-h-screen w-full bg-[#0a0a0a] px-4 py-6 pb-20 pt-32 text-white">
+      <div className="mx-auto w-full max-w-[960px] space-y-3">
+        <header
+          className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-md"
+          style={{
+            clipPath: "polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%)",
+          }}
+        >
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Parking Patrol</p>
+          <h1 className="mt-1 text-3xl font-black tracking-tight text-white">Live Incident Desk</h1>
+          <p className="mt-2 text-sm leading-relaxed text-[#aaa]">
+            Report, chat, escalate, and resolve parking incidents in one mobile-first flow.
+          </p>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 text-xs font-bold text-green-400">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-400" />
+              Live
+            </span>
+            <Link
+              href="/profile/reports"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/10 px-4 text-xs font-bold text-[#aaa]"
+            >
+              History Archive
+            </Link>
           </div>
         </header>
 
         {schemaError ? (
-          <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
             {schemaError}
           </div>
         ) : null}
 
-        <section className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 md:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
-                  Live Incident
-                </h2>
-                <p className="mt-1 text-sm text-text-secondary">
-                  One live report thread at a time. Unmatched and finished reports stay in profile history.
-                </p>
-              </div>
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/30 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-white/80">
+        <section className="space-y-3">
+          <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Live Incident</p>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-xs font-bold text-[#888]">
                 {isLoadingReports ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                {reports.length} Active
+                {reports.length}
               </span>
             </div>
             {selectedReport ? (
-              <div className="mt-3 rounded-xl border border-white/10 bg-black/30 px-3 py-3">
+              <div className="mt-3 rounded-xl border border-white/[0.06] bg-[#161616] px-3 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-mono text-sm font-bold tracking-wider">{selectedReport.license_plate}</p>
-                  <span className="text-[11px] text-white/60">{formatElapsed(selectedReport.created_at)}</span>
+                  <p className="font-mono text-2xl font-black tracking-widest text-[#f5a623]">
+                    {selectedReport.license_plate}
+                  </p>
+                  <span className="text-xs text-[#555]">{formatElapsed(selectedReport.created_at)}</span>
                 </div>
-                <p className="mt-1 line-clamp-2 text-xs text-text-secondary">
+                <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-[#aaa]">
                   {selectedReport.location_description}
                 </p>
               </div>
-            ) : null}
+            ) : (
+              <p className="mt-3 rounded-2xl border border-dashed border-white/10 p-4 text-sm text-[#888]">
+                No live report is active for your account right now.
+              </p>
+            )}
           </div>
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-6">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-sm font-black uppercase tracking-[0.2em] text-text-secondary">
-                    Report Blocking Vehicle
-                  </h2>
-                  <p className="mt-2 text-sm text-text-secondary">
-                    Enter plate, optionally upload photo for extraction, and submit.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setReportPanelOpen((current) => !current)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-accent-amber bg-accent-amber px-5 py-3 text-sm font-black uppercase tracking-[0.16em] text-campus-black shadow-[0_8px_24px_rgba(231,178,30,0.25)] transition-transform hover:scale-[1.01] hover:bg-[#e7b21e] sm:w-auto"
-                >
-                  <ShieldAlert className="h-4 w-4" />
-                  {reportPanelOpen ? "Hide Report Form" : "Open Report Form"}
-                </button>
+          <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Report Vehicle</p>
+                <p className="mt-1 text-sm text-[#aaa]">Upload, auto-detect plate, and submit in one flow.</p>
               </div>
-              {!reportPanelOpen ? (
-                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-accent-amber">
-                  Report form is hidden. Tap Open Report Form to start a new report.
-                </p>
-              ) : null}
+              <button
+                type="button"
+                onClick={() => setReportPanelOpen((current) => !current)}
+                className="inline-flex h-12 min-w-[140px] items-center justify-center gap-2 rounded-xl bg-[#f5a623] px-4 text-sm font-bold text-black transition-transform active:scale-95"
+              >
+                <ShieldAlert className="h-4 w-4" />
+                {reportPanelOpen ? "Hide Form" : "Open Form"}
+              </button>
+            </div>
 
-              {submitMessage ? (
-                <p className="mt-4 inline-flex items-center gap-2 whitespace-pre-line rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  {submitMessage}
-                </p>
-              ) : null}
-              {submitError ? (
-                <p className="mt-4 inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  {submitError}
-                </p>
-              ) : null}
-              {unmatchedReport ? (
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+            {submitMessage ? (
+              <p className="mt-3 rounded-xl border border-green-500/20 bg-green-500/10 px-3 py-2 text-sm whitespace-pre-line text-green-300">
+                {submitMessage}
+              </p>
+            ) : null}
+            {submitError ? (
+              <p className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                <AlertCircle className="h-4 w-4" />
+                {submitError}
+              </p>
+            ) : null}
+            {unmatchedReport ? (
+              <div className="mt-3 rounded-2xl border-2 border-dashed border-amber-500/30 bg-amber-500/5 p-4 text-center">
+                <p className="text-3xl">⚠️</p>
+                <p className="mt-2 text-sm font-bold text-white">Vehicle not registered in NIE Sync.</p>
+                <p className="mt-1 text-xs text-[#888]">Share or download details for manual follow-up.</p>
+                <div className="mt-3 space-y-2">
                   <button
                     type="button"
                     onClick={handleCopyUnmatchedDetails}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-accent-amber bg-accent-amber px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-campus-black transition-colors hover:bg-[#e7b21e]"
+                    className="h-12 w-full rounded-xl border border-white/10 bg-transparent text-sm font-bold text-[#aaa]"
                   >
-                    <Copy className="h-4 w-4" />
-                    Copy Report Details
+                    Copy Details
                   </button>
-                  {copyDetailsMessage ? (
-                    <p className="text-xs font-semibold text-accent-amber">{copyDetailsMessage}</p>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={handleDownloadUnmatchedPdf}
+                    className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-transparent text-sm font-bold text-[#aaa]"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download PDF
+                  </button>
+                  {copyDetailsMessage ? <p className="text-xs text-[#888]">{copyDetailsMessage}</p> : null}
                 </div>
-              ) : null}
+              </div>
+            ) : null}
 
-              {reportPanelOpen ? (
-                <div className="mt-5 space-y-5 rounded-2xl border border-white/10 bg-black/30 p-4 sm:p-5">
-                  <div className="space-y-3">
-                    <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
-                      Vehicle Plate
-                    </label>
+            {reportPanelOpen ? (
+              <div className="mt-4 space-y-3 rounded-2xl border border-white/[0.06] bg-[#161616] p-4">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Vehicle Plate</p>
+                  <input
+                    type="text"
+                    value={plateInput}
+                    onChange={(event) => setPlateInput(formatParkingReportPlateInput(event.target.value))}
+                    placeholder="KA-09-AB-1234"
+                    className="mt-2 w-full rounded-xl border border-white/[0.06] bg-[#111] p-4 text-center font-mono text-2xl font-black tracking-widest text-[#f5a623] outline-none focus:border-[#f5a623]/40"
+                  />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Photo Upload</p>
+                  <label className="relative mt-2 flex min-h-[160px] w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-white/10 bg-white/[0.02] p-6 transition-colors active:border-[#f5a623]/40">
                     <input
-                      type="text"
-                      value={plateInput}
-                      onChange={(event) =>
-                        setPlateInput(formatParkingReportPlateInput(event.target.value))
-                      }
-                      placeholder="KA-09-AB-1234"
-                      className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-base font-mono tracking-widest text-white outline-none transition-colors placeholder:text-white/30 focus:border-accent-amber/60"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] || null;
+                        void handlePhotoChange(file);
+                      }}
                     />
-                  </div>
-
-                  <div className="space-y-3">
-                    <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
-                      Photo (Optional)
-                    </label>
-                    <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/[0.02] px-4 py-4 text-xs font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-white/[0.06]">
-                      <Camera className="h-4 w-4 text-accent-amber" />
-                      {isRunningOcr ? "Extracting plate..." : "Upload or capture photo"}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0] || null;
-                          void handlePhotoChange(file);
-                        }}
-                      />
-                    </label>
                     {photoPreview ? (
-                      <div className="overflow-hidden rounded-xl border border-white/10">
-                        <img
-                          src={photoPreview}
-                          alt="Incident preview"
-                          className="h-52 w-full object-cover"
-                        />
+                      <div className="relative w-full overflow-hidden rounded-xl border border-white/[0.06]">
+                        <img src={photoPreview} alt="Incident preview" className="h-48 w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (photoPreview) URL.revokeObjectURL(photoPreview);
+                            setPhotoFile(null);
+                            setPhotoPreview("");
+                            setOcrRawText("");
+                          }}
+                          className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white"
+                          aria-label="Remove photo"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       </div>
                     ) : (
-                      <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.01] text-xs text-text-secondary">
-                        Photo preview appears here
-                      </div>
+                      <>
+                        <Camera className="h-8 w-8 text-[#555]" />
+                        <p className="text-sm text-[#888]">{isRunningOcr ? "Extracting plate..." : "Tap to capture or upload"}</p>
+                        <p className="text-xs text-[#555]">Photo will be compressed automatically</p>
+                      </>
                     )}
-                  </div>
+                  </label>
+                </div>
 
-                  <div className="space-y-3">
-                    <label className="text-xs font-bold uppercase tracking-[0.16em] text-text-secondary">
-                      Location / Reporter Note
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {COMMON_LOCATION_ZONES.map((zone) => (
+                {photoFile ? (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Detected Plate</p>
+                    {isRunningOcr ? (
+                      <div className="mt-2 h-14 animate-pulse rounded-xl bg-white/[0.04]" />
+                    ) : (
+                      <input
+                        type="text"
+                        value={plateInput}
+                        onChange={(event) => setPlateInput(formatParkingReportPlateInput(event.target.value))}
+                        className="mt-2 w-full rounded-xl border border-[#f5a623]/20 bg-[#111] p-4 text-center font-mono text-xl font-black tracking-widest text-[#f5a623] outline-none"
+                      />
+                    )}
+                    <p className="mt-2 text-center text-xs text-[#555]">OCR auto-filled · Edit if incorrect</p>
+                  </div>
+                ) : null}
+
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Location</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {LOCATION_OPTIONS.map((zone) => {
+                      const selected = selectedLocationChip === zone;
+                      return (
                         <button
                           key={zone}
                           type="button"
-                          onClick={() => setLocationInput(zone)}
-                          className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                            locationInput === zone
-                              ? "border-accent-amber/50 bg-accent-amber/20 text-accent-amber"
-                              : "border-white/15 bg-white/[0.03] text-text-secondary hover:text-white"
+                          onClick={() => {
+                            setSelectedLocationChip(zone);
+                            if (zone !== "Other") {
+                              setLocationInput(zone);
+                            } else if (COMMON_LOCATION_ZONES.includes(locationInput)) {
+                              setLocationInput("");
+                            }
+                          }}
+                          className={`rounded-xl px-4 py-2 text-xs font-semibold transition-transform active:scale-95 ${
+                            selected
+                              ? "border border-[#f5a623]/30 bg-[#f5a623]/10 text-[#f5a623]"
+                              : "border border-white/[0.06] bg-white/[0.04] text-[#888]"
                           }`}
                         >
                           {zone}
                         </button>
-                      ))}
-                    </div>
+                      );
+                    })}
+                  </div>
+                  {selectedLocationChip === "Other" ? (
                     <textarea
                       value={locationInput}
                       onChange={(event) => setLocationInput(event.target.value)}
-                      placeholder="Example: You have blocked my bike exit near Library Gate."
-                      rows={4}
-                      className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-white/30 focus:border-accent-amber/60"
+                      placeholder="Describe exact location"
+                      rows={3}
+                      className="mt-2 w-full rounded-xl border border-white/[0.06] bg-[#111] p-3 text-sm text-white outline-none placeholder:text-[#444] focus:border-[#f5a623]/40"
                     />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleSubmitReport}
-                    disabled={isSubmitting || !isLoggedIn}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20 disabled:opacity-60"
-                  >
-                    {isSubmitting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <UploadCloud className="h-4 w-4" />
-                    )}
-                    {isSubmitting ? "Submitting..." : "Submit Incident Report"}
-                  </button>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 md:p-6">
+                <button
+                  type="button"
+                  onClick={handleSubmitReport}
+                  disabled={isSubmitting || !isLoggedIn}
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#f5a623] text-sm font-bold text-black transition-transform active:scale-95 disabled:opacity-60"
+                >
+                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                  {isSubmitting ? "Submitting..." : "Submit Incident Report"}
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-sm font-black uppercase tracking-[0.2em] text-text-secondary">
-                  Live Incident Thread
-                </h2>
+                <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Live Incident Thread</h2>
                 {selectedReport ? (
                   <span
-                    className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${STATUS_THEME[selectedReport.status]}`}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${STATUS_THEME[selectedReport.status]}`}
                   >
                     {selectedReport.status.replace("_", " ")}
                   </span>
@@ -1006,50 +1116,102 @@ function ParkingPatrolPageContent() {
                     <div className="h-12 rounded-xl bg-white/10" />
                   </div>
                 ) : (
-                  <p className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-text-secondary">
+                  <p className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-[#888]">
                     No live report is active for your account right now.
                   </p>
                 )
               ) : (
                 <div className="space-y-4">
-                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="font-mono text-lg font-bold tracking-wider">
-                        {selectedReport.license_plate}
-                      </p>
-                      <p className="mt-1 text-xs text-text-secondary">
-                        Reporter note: {selectedReport.location_description}
-                      </p>
-                      <p className="mt-1 text-[11px] text-white/50">
-                        Created {formatElapsed(selectedReport.created_at)}
-                      </p>
+                  <div
+                    className="rounded-2xl border border-white/[0.06] bg-[#161616] p-4"
+                    style={{
+                      clipPath:
+                        "polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%)",
+                    }}
+                  >
+                    <div className="px-1 pb-4 sm:px-4">
+                      <div className="relative flex items-start justify-between">
+                        <div className="absolute left-0 right-0 top-3 h-[1px] bg-white/10" />
+                        <div
+                          className="absolute left-0 top-3 h-[1px] bg-gradient-to-r from-green-400 via-[#f5a623] to-[#ef4444] transition-all"
+                          style={{ width: `${stageLineFillPercent}%` }}
+                        />
+                        {["Chat", "Email", "Call"].map((label, index) => {
+                          const node = index + 1;
+                          const completed = stage > node;
+                          const active = stage === node;
+                          const nodeClass = completed
+                            ? "bg-green-500 border-green-400"
+                            : active
+                              ? "bg-[#f5a623] border-[#f5a623]"
+                              : "bg-transparent border-[#555]";
+                          const textClass = completed
+                            ? "text-green-400"
+                            : active
+                              ? "text-[#f5a623]"
+                              : "text-[#555]";
+                          return (
+                            <div key={label} className="relative z-10 flex flex-col items-center gap-1.5">
+                              <span className={`h-6 w-6 rounded-full border-2 ${nodeClass}`} />
+                              <span className={`text-[9px] font-bold uppercase tracking-[0.12em] sm:text-[10px] ${textClass}`}>
+                                {label}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {(selectedReport.status === "pending" ||
-                        selectedReport.status === "chatting") && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-white/15 px-3 py-1 text-[11px] text-text-secondary">
-                          <Clock3 className="h-3.5 w-3.5" />
-                          {formatTwoMinuteCountdown(selectedReport.created_at, synchronizedNowMs)}
-                        </span>
-                      )}
+
+                    <div className="mt-2 flex flex-col items-center justify-center">
+                      <div className="relative h-28 w-28 sm:h-36 sm:w-36">
+                        <svg className="h-full w-full -rotate-90" viewBox="0 0 120 120">
+                          <circle cx="60" cy="60" r={circleRadius} stroke="rgba(255,255,255,0.08)" strokeWidth="6" fill="none" />
+                          <circle
+                            cx="60"
+                            cy="60"
+                            r={circleRadius}
+                            stroke={stageCountdown.ringColor}
+                            strokeWidth="6"
+                            fill="none"
+                            strokeDasharray={circleLength}
+                            strokeDashoffset={circleOffset}
+                            strokeLinecap="round"
+                            className="transition-all duration-1000 ease-linear"
+                          />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <span className="font-mono text-3xl font-black text-white sm:text-4xl">{stageCountdown.display}</span>
+                        </div>
+                      </div>
+                      <span className="mt-2 text-[10px] uppercase tracking-[0.2em] text-[#888]">
+                        {stageCountdown.label}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-mono text-2xl font-black tracking-widest text-[#f5a623]">
+                          {selectedReport.license_plate}
+                        </p>
+                        <p className="mt-1 text-sm leading-relaxed text-[#aaa]">{selectedReport.location_description}</p>
+                        <p className="mt-1 text-xs text-[#555]">{formatElapsed(selectedReport.created_at)}</p>
+                      </div>
                       <span
-                        className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${STATUS_THEME[selectedReport.status]}`}
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${STATUS_THEME[selectedReport.status]}`}
                       >
                         {selectedReport.status.replace("_", " ")}
                       </span>
                     </div>
-                  </div>
 
-                  <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="mt-4 space-y-2">
                     {canOwnerAcknowledge ? (
                       <button
                         type="button"
                         onClick={handleOwnerAcknowledge}
                         disabled={isAcknowledging}
-                        className="rounded-lg border border-emerald-400/40 bg-emerald-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-100 transition-colors hover:bg-emerald-500/30 disabled:opacity-60"
+                        className="h-12 w-full rounded-xl bg-[#f5a623] text-sm font-bold text-black transition-transform active:scale-95 disabled:opacity-60"
                       >
-                        {isAcknowledging ? "Updating..." : "I am moving"}
+                        {isAcknowledging ? "Updating..." : "I'm Moving"}
                       </button>
                     ) : null}
 
@@ -1058,9 +1220,9 @@ function ParkingPatrolPageContent() {
                         type="button"
                         onClick={handleReporterResolve}
                         disabled={isResolving}
-                        className="rounded-lg border border-green-400/40 bg-green-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-green-100 transition-colors hover:bg-green-500/30 disabled:opacity-60"
+                        className="h-12 w-full rounded-xl bg-[#22c55e] text-sm font-bold text-black disabled:opacity-60"
                       >
-                        {isResolving ? "Resolving..." : "Mark resolved"}
+                        {isResolving ? "Resolving..." : "Mark Resolved"}
                       </button>
                     ) : null}
 
@@ -1070,12 +1232,12 @@ function ParkingPatrolPageContent() {
                           type="button"
                           onClick={handleReporterMarkUnresolved}
                           disabled={isMarkingUnresolved}
-                          className="rounded-lg border border-amber-400/40 bg-amber-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-100 transition-colors hover:bg-amber-500/30 disabled:opacity-60"
+                          className="h-12 w-full rounded-xl border border-white/10 bg-transparent text-sm font-bold text-[#aaa] transition-transform active:scale-95 disabled:opacity-60"
                         >
-                          {isMarkingUnresolved ? "Updating..." : "Still blocked (unresolved)"}
+                          {isMarkingUnresolved ? "Updating..." : "Still Blocked (Unresolved)"}
                         </button>
                       ) : (
-                        <div className="flex items-center rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-amber-100/90">
+                        <div className="h-12 w-full rounded-xl border border-white/10 px-4 text-center text-xs font-bold leading-[48px] tracking-[0.06em] text-[#888]">
                           Unresolved opens in {unresolvedCountdown}
                         </div>
                       )
@@ -1086,59 +1248,76 @@ function ParkingPatrolPageContent() {
                         type="button"
                         onClick={handleRevealAndCall}
                         disabled={isCallingOwner}
-                        className="rounded-lg border border-orange-400/40 bg-orange-500/20 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-orange-100 transition-colors hover:bg-orange-500/30 disabled:opacity-60"
+                        className="h-12 w-full rounded-xl bg-[#ef4444] text-sm font-bold text-white transition-transform active:scale-95 disabled:opacity-60"
                       >
-                        {isCallingOwner ? "Revealing..." : "Reveal and call owner"}
+                        {isCallingOwner ? "Revealing..." : "Call Owner"}
                       </button>
                     ) : null}
 
                     {ownerPhone ? (
                       <a
                         href={`tel:${ownerPhone}`}
-                        className="inline-flex items-center justify-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white"
+                        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-transparent text-sm font-bold text-[#aaa]"
                       >
-                        <PhoneCall className="h-3.5 w-3.5" />
+                        <PhoneCall className="h-4 w-4" />
                         {ownerPhone}
                       </a>
                     ) : null}
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#111]">
                   {!chatWindowOpen &&
                   (selectedReport.status === "pending" ||
                     selectedReport.status === "chatting") ? (
-                    <div className="mb-3 rounded-lg border border-indigo-400/35 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-100">
-                      Chat window closed after 2 minutes. Escalation stage is active.
+                    <div className="border-b border-white/[0.06] bg-blue-500/10 px-4 py-2 text-xs text-blue-300">
+                      Chat window closed after 1 minute. Escalation stage is active.
                     </div>
                   ) : null}
 
-                  <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+                  <div
+                    ref={messageListRef}
+                    className="max-h-64 space-y-3 overflow-y-auto overscroll-contain p-4 scroll-smooth"
+                  >
                     {messages.length === 0 ? (
-                      <p className="rounded-lg border border-dashed border-white/10 px-3 py-4 text-xs text-text-secondary">
+                      <p className="rounded-xl border border-dashed border-white/10 p-3 text-xs text-[#555]">
                         No messages in this thread yet.
                       </p>
                     ) : (
-                      messages.map((message) => (
-                        <div
-                          key={message.id}
-                          className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-text-secondary">
-                              {getThreadRoleLabel(message, Boolean(isReporter), Boolean(isOwner))}
-                            </span>
-                            <span className="text-[10px] text-white/40">
-                              {formatElapsed(message.created_at)}
-                            </span>
+                      messages.map((message) => {
+                        if (message.sender_role === "system") {
+                          return (
+                            <p key={message.id} className="py-1 text-center text-xs italic text-[#555]">
+                              {message.message}
+                            </p>
+                          );
+                        }
+
+                        const isReporterMessage = message.sender_role === "reporter";
+                        return (
+                          <div key={message.id} className={isReporterMessage ? "flex justify-end" : "flex justify-start"}>
+                            <div className="max-w-[80%]">
+                              <p className={`mb-1 text-[10px] text-[#555] ${isReporterMessage ? "text-right" : ""}`}>
+                                {getThreadRoleLabel(message)}
+                              </p>
+                              <div
+                                className={`rounded-2xl px-4 py-2.5 text-sm ${
+                                  isReporterMessage
+                                    ? "rounded-tr-sm border border-[#f5a623]/20 bg-[#f5a623]/15 text-[#f5a623]"
+                                    : "rounded-tl-sm border border-white/[0.06] bg-white/[0.04] text-[#ccc]"
+                                }`}
+                              >
+                                {message.message}
+                              </div>
+                            </div>
                           </div>
-                          <p className="mt-1 text-sm text-white/90">{message.message}</p>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
 
-                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                  <div className="sticky bottom-0 border-t border-white/[0.06] bg-[#0a0a0a] p-3">
+                    <div className="flex gap-2">
                     <input
                       type="text"
                       value={threadDraft}
@@ -1149,43 +1328,41 @@ function ParkingPatrolPageContent() {
                           void handleSendThreadMessage();
                         }
                       }}
-                      placeholder="Send a message in this thread..."
+                      placeholder="Type a message..."
                       disabled={isChatReadOnly || isSendingMessage}
-                      className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-white/30 focus:border-accent-blue/60 disabled:opacity-60"
+                      className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-[#444] focus:border-[#f5a623]/40 disabled:opacity-60"
                     />
                     <button
                       type="button"
                       onClick={handleSendThreadMessage}
                       disabled={isChatReadOnly || !threadDraft.trim() || isSendingMessage}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20 disabled:opacity-60"
+                      className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-[#f5a623]/20 bg-[#f5a623]/10 text-[#f5a623] transition-transform active:scale-95 disabled:opacity-60"
                     >
                       {isSendingMessage ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Send className="h-4 w-4" />
                       )}
-                      Send
                     </button>
-                  </div>
+                    </div>
 
-                  {!chatWindowOpen || selectedReport.status === "resolved" ? (
-                    <div className="mt-3">
+                    {!chatWindowOpen || selectedReport.status === "resolved" ? (
                       <button
                         type="button"
                         onClick={handleDownloadTranscript}
                         disabled={messages.length === 0}
-                        className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition-colors hover:bg-white/20 disabled:opacity-60"
+                        className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-transparent text-sm font-bold text-[#aaa] disabled:opacity-60"
                       >
-                        <Download className="h-3.5 w-3.5" />
-                        Download transcript
+                        <Download className="h-4 w-4" />
+                        Download Transcript
                       </button>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
 
                 {threadActionError ? (
-                  <p className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                    <AlertCircle className="h-3.5 w-3.5" />
+                  <p className="inline-flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                    <AlertCircle className="h-4 w-4" />
                     {threadActionError}
                   </p>
                 ) : null}
@@ -1202,14 +1379,11 @@ export default function ParkingPatrolPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
-          <div className="mx-auto w-full max-w-7xl animate-pulse space-y-6">
-            <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
-            <div className="space-y-6">
-              <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
-              <div className="h-[46vh] rounded-3xl border border-white/10 bg-white/[0.03]" />
-              <div className="h-[36vh] rounded-3xl border border-white/10 bg-white/[0.03]" />
-            </div>
+        <main className="min-h-screen w-full bg-[#0a0a0a] px-4 py-6 pb-20 pt-32 text-white">
+          <div className="mx-auto w-full max-w-[640px] animate-pulse space-y-3">
+            <div className="h-40 rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
+            <div className="h-96 rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
+            <div className="h-80 rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
           </div>
         </main>
       }

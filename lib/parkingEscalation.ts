@@ -13,6 +13,7 @@ type EscalationReportRow = {
   license_plate: string;
   location_description: string;
   resolve_token: string;
+  status: "pending" | "chatting" | "email_sent" | "acknowledged" | "resolved" | "unmatched" | "expired";
   matched_owner_id: string | null;
   matched_owner?: OwnerProfile | OwnerProfile[] | null;
 };
@@ -21,12 +22,6 @@ export type ParkingEscalationSummary = {
   scanned: number;
   escalated: number;
   failures: Array<{ reportId: string; error: string }>;
-};
-
-export type ParkingSingleEscalationSummary = {
-  reportId: string;
-  escalated: boolean;
-  error?: string;
 };
 
 function getSupabaseAdminClient() {
@@ -62,7 +57,7 @@ function getOwnerDisplayName(owner: OwnerProfile | null) {
 }
 
 function getDueCutoffIso() {
-  return new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  return new Date(Date.now() - 1 * 60 * 1000).toISOString();
 }
 
 function normalizeBaseUrl(value: string) {
@@ -88,6 +83,27 @@ async function escalateReportRow(
   appBaseUrl: string
 ): Promise<EscalateRowResult> {
   try {
+    const escalatedAt = new Date().toISOString();
+    const { data: updated, error: updateError } = await supabase
+      .from("parking_reports")
+      .update({
+        status: "email_sent",
+        email_sent_at: escalatedAt,
+      })
+      .eq("id", report.id)
+      .in("status", ["pending", "chatting"])
+      .is("email_sent_at", null)
+      .select("id")
+      .maybeSingle();
+
+    if (updateError) {
+      return { escalated: false, error: updateError.message || "Failed to lock parking report for escalation." };
+    }
+
+    if (!updated?.id) {
+      return { escalated: false };
+    }
+
     const owner = getOwnerProfile(report.matched_owner);
     let ownerEmail = String(owner?.email || "").trim();
     const ownerName = getOwnerDisplayName(owner);
@@ -102,42 +118,48 @@ async function escalateReportRow(
     }
 
     if (!ownerEmail) {
+      await supabase
+        .from("parking_reports")
+        .update({
+          status: report.status,
+          email_sent_at: null,
+        })
+        .eq("id", report.id)
+        .eq("status", "email_sent")
+        .eq("email_sent_at", escalatedAt);
       return { escalated: false, error: "Matched owner email is missing." };
     }
 
     const resolveUrl = `${appBaseUrl}/resolve/${report.id}/${report.resolve_token}`;
-    await sendParkingEmail({
-      toEmail: ownerEmail,
-      ownerName,
-      plate: report.license_plate,
-      location: report.location_description,
-      resolveUrl,
-    });
+    try {
+      await sendParkingEmail({
+        toEmail: ownerEmail,
+        ownerName,
+        plate: report.license_plate,
+        location: report.location_description,
+        resolveUrl,
+      });
+    } catch (error) {
+      await supabase
+        .from("parking_reports")
+        .update({
+          status: report.status,
+          email_sent_at: null,
+        })
+        .eq("id", report.id)
+        .eq("status", "email_sent")
+        .eq("email_sent_at", escalatedAt);
 
-    const { data: updated, error: updateError } = await supabase
-      .from("parking_reports")
-      .update({
-        status: "email_sent",
-        email_sent_at: new Date().toISOString(),
-      })
-      .eq("id", report.id)
-      .in("status", ["pending", "chatting"])
-      .is("email_sent_at", null)
-      .select("id")
-      .maybeSingle();
-
-    if (updateError) {
-      return { escalated: false, error: updateError.message || "Failed to update parking report status." };
-    }
-
-    if (!updated?.id) {
-      return { escalated: false };
+      return {
+        escalated: false,
+        error: error instanceof Error ? error.message : "Failed to send parking escalation email.",
+      };
     }
 
     const { error: messageError } = await supabase.from("parking_report_messages").insert({
       report_id: report.id,
       sender_role: "system",
-      message: "No response in 2 minutes. An email has been sent to the vehicle owner.",
+      message: "No response in 1 minute. An email has been sent to the vehicle owner.",
     });
 
     if (messageError) {
@@ -168,6 +190,7 @@ export async function runParkingEscalation(appBaseUrl: string): Promise<ParkingE
       license_plate,
       location_description,
       resolve_token,
+      status,
       matched_owner_id,
       matched_owner:profiles!matched_owner_id (
         *
@@ -206,64 +229,4 @@ export async function runParkingEscalation(appBaseUrl: string): Promise<ParkingE
   }
 
   return summary;
-}
-
-export async function runParkingEscalationForReport(
-  reportId: string,
-  appBaseUrl: string
-): Promise<ParkingSingleEscalationSummary> {
-  const normalizedReportId = String(reportId || "").trim();
-  if (!normalizedReportId) {
-    return { reportId: "", escalated: false, error: "Report id is required." };
-  }
-
-  const supabase = getSupabaseAdminClient();
-  const normalizedBaseUrl = normalizeBaseUrl(appBaseUrl);
-  if (!normalizedBaseUrl) {
-    return {
-      reportId: normalizedReportId,
-      escalated: false,
-      error: "App base URL is required for parking escalation emails.",
-    };
-  }
-
-  const { data: report, error } = await supabase
-    .from("parking_reports")
-    .select(
-      `
-      id,
-      license_plate,
-      location_description,
-      resolve_token,
-      matched_owner_id,
-      matched_owner:profiles!matched_owner_id (
-        *
-      )
-    `
-    )
-    .eq("id", normalizedReportId)
-    .in("status", ["pending", "chatting"])
-    .is("email_sent_at", null)
-    .lte("created_at", getDueCutoffIso())
-    .not("matched_owner_id", "is", null)
-    .maybeSingle();
-
-  if (error) {
-    return {
-      reportId: normalizedReportId,
-      escalated: false,
-      error: error.message || "Failed to fetch parking report for escalation.",
-    };
-  }
-
-  if (!report) {
-    return { reportId: normalizedReportId, escalated: false };
-  }
-
-  const result = await escalateReportRow(supabase, report as EscalationReportRow, normalizedBaseUrl);
-  return {
-    reportId: normalizedReportId,
-    escalated: result.escalated,
-    error: result.error,
-  };
 }

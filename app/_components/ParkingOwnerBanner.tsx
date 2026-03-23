@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3 } from "lucide-react";
+import { CheckCircle2, Clock3 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 
 type OwnerReportBannerRow = {
@@ -25,7 +25,18 @@ const HIDDEN_ROUTES = [
 
 function formatCountdown(createdAt: string, nowMs: number) {
   const createdMs = new Date(createdAt).getTime();
-  if (Number.isNaN(createdMs)) return "2:00";
+  if (Number.isNaN(createdMs)) return "1:00";
+
+  const elapsed = Math.floor((nowMs - createdMs) / 1000);
+  const remaining = Math.max(0, 60 - elapsed);
+  const mm = Math.floor(remaining / 60);
+  const ss = remaining % 60;
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+
+function formatStageTwoCountdown(createdAt: string, nowMs: number) {
+  const createdMs = new Date(createdAt).getTime();
+  if (Number.isNaN(createdMs)) return "1:00";
 
   const elapsed = Math.floor((nowMs - createdMs) / 1000);
   const remaining = Math.max(0, 120 - elapsed);
@@ -162,25 +173,44 @@ export function ParkingOwnerBanner() {
   if (HIDDEN_ROUTES.includes(pathname)) return null;
   if (!activeReport) return null;
 
-  const countdownVisible =
-    activeReport.status === "pending" || activeReport.status === "chatting";
   const canAcknowledge =
     activeReport.status === "pending" ||
     activeReport.status === "chatting" ||
     activeReport.status === "email_sent";
   const createdAtMs = new Date(activeReport.created_at).getTime();
-  const isChatWindowClosed = Number.isFinite(createdAtMs)
-    ? synchronizedNowMs - createdAtMs >= 2 * 60 * 1000
-    : false;
-  const countdownText = formatCountdown(activeReport.created_at, synchronizedNowMs);
+  const elapsedSeconds = Number.isFinite(createdAtMs)
+    ? Math.max(0, Math.floor((synchronizedNowMs - createdAtMs) / 1000))
+    : 0;
+  const stage = activeReport.status === "email_sent" && elapsedSeconds >= 120
+    ? 3
+    : activeReport.status === "email_sent" || elapsedSeconds >= 60
+      ? 2
+      : 1;
+  const countdownText = stage === 1
+    ? formatCountdown(activeReport.created_at, synchronizedNowMs)
+    : stage === 2
+      ? formatStageTwoCountdown(activeReport.created_at, synchronizedNowMs)
+      : "-";
   const stageLabel =
-    activeReport.status === "email_sent"
-      ? "Chat window closed. Escalation is active."
-      : isChatWindowClosed
-        ? "Chat window closed. Escalation is active."
-        : activeReport.status === "pending"
-          ? "Waiting for your response"
-          : "Chat is active";
+    stage === 1
+      ? "Stage 1 - Chat window open"
+      : stage === 2
+        ? "Stage 2 - Email escalation active"
+        : "Stage 3 - Reporter can call";
+  const stageContainerClass =
+    stage === 1
+      ? "border-green-500/20 bg-green-500/10"
+      : stage === 2
+        ? "border-amber-500/20 bg-amber-500/10"
+        : "border-red-500/20 bg-red-500/10";
+  const leftBorderClass =
+    stage === 1 ? "bg-green-400" : stage === 2 ? "bg-[#f5a623]" : "bg-red-400";
+  const actionClass =
+    stage === 1
+      ? "border-green-500/20 text-green-300"
+      : stage === 2
+        ? "border-amber-500/20 text-amber-200"
+        : "border-red-500/20 text-red-200";
 
   const handleImMoving = async () => {
     if (!activeReport?.id) return;
@@ -199,49 +229,41 @@ export function ParkingOwnerBanner() {
   };
 
   return (
-    <div className="fixed left-0 right-0 top-[84px] z-[95] px-4 md:px-8">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 rounded-2xl border border-amber-300/30 bg-amber-400/10 px-4 py-3 text-white shadow-[0_10px_40px_rgba(0,0,0,0.35)] backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 rounded-full border border-amber-200/40 bg-amber-300/20 p-1.5">
-            <AlertTriangle className="h-4 w-4 text-amber-200" />
+    <div className="fixed left-0 right-0 top-[84px] z-[95]">
+      <div className={`relative w-full border-b px-4 py-3 backdrop-blur-md ${stageContainerClass}`}>
+        <span className={`absolute inset-y-0 left-0 w-1 animate-pulse ${leftBorderClass}`} />
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="truncate text-xs font-bold tracking-wider text-white/90">
+              {activeReport.license_plate} - {activeReport.location_description}
+            </p>
+            <p className="mt-1 text-[11px] text-white/70">{stageLabel}</p>
+            {errorMessage ? <p className="mt-1 text-xs text-red-200">{errorMessage}</p> : null}
           </div>
-          <div>
-            <p className="text-sm font-semibold">
-              Your vehicle <span className="font-mono">{activeReport.license_plate}</span> was reported.
-              <span className="ml-1 text-amber-100/90">Note: {activeReport.location_description}</span>
-            </p>
-            <p className="mt-0.5 text-xs text-amber-100/90">
-              {stageLabel}
-              {countdownVisible ? (
-                <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-200/30 px-2 py-0.5 text-[11px]">
-                  <Clock3 className="h-3 w-3" /> {countdownText}
-                </span>
-              ) : null}
-            </p>
-            {errorMessage ? (
-              <p className="mt-1 text-xs text-red-200">{errorMessage}</p>
+
+          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold ${actionClass}`}>
+              <Clock3 className="h-3 w-3" />
+              {countdownText}
+            </span>
+            <Link
+              href={`/parking-patrol?report=${activeReport.id}`}
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-white/15 px-3 text-xs font-bold text-white"
+            >
+              Respond &gt;
+            </Link>
+            {canAcknowledge ? (
+              <button
+                type="button"
+                onClick={handleImMoving}
+                disabled={isResolving}
+                className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-green-400/20 bg-green-500/15 px-3 text-xs font-bold text-green-200 disabled:opacity-60"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {isResolving ? "..." : "I'm Moving"}
+              </button>
             ) : null}
           </div>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href={`/parking-patrol?report=${activeReport.id}`}
-            className="inline-flex items-center justify-center rounded-lg border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-white/20"
-          >
-            Open Report
-          </Link>
-          {canAcknowledge ? (
-            <button
-              type="button"
-              onClick={handleImMoving}
-              disabled={isResolving}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-500/20 px-4 py-2 text-xs font-bold uppercase tracking-wider text-emerald-100 transition-colors hover:bg-emerald-500/30 disabled:opacity-60"
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              {isResolving ? "Updating..." : "I'm Moving"}
-            </button>
-          ) : null}
         </div>
       </div>
     </div>

@@ -152,7 +152,7 @@ export async function sendParkingEmail({
   const logoAttachment = resolveLogoAttachment();
   const logoMarkup = logoAttachment
     ? `<img src="cid:${logoAttachment.cid}" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`
-    : `<div style="display:inline-block;width:56px;height:56px;line-height:56px;text-align:center;border-radius:12px;background:#111111;color:#FFB000;font-size:11px;font-weight:900;letter-spacing:.08em;">NIE</div>`;
+    : `<img src="https://niesync.vercel.app/logo.png" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`;
 
   const subject = "NIE Sync | Parking Report Action Required";
   const { user: smtpUser, primary, fallback } = getTransporters();
@@ -259,20 +259,6 @@ export async function sendParkingEmail({
     </html>
   `.trim();
 
-  const text = [
-    `Hello ${ownerName?.trim() || "Vehicle Owner"},`,
-    "",
-    `Your vehicle ${plate} has been reported for this note: ${location}.`,
-    "Please confirm once you have moved your vehicle:",
-    resolveUrl,
-    "",
-    "This automated notification was sent by NIE Sync Parking Patrol.",
-    "Need help? FAQ: https://niesync.vercel.app/faq",
-    "Terms: https://niesync.vercel.app/terms-of-service",
-    "Privacy: https://niesync.vercel.app/privacy-policy",
-    "Copyright 2026 NIE Sync. All rights reserved.",
-  ].join("\n");
-
   const attachments = logoAttachment ? [logoAttachment] : [];
   let lastError: unknown = null;
 
@@ -283,7 +269,6 @@ export async function sendParkingEmail({
         to: toEmail,
         subject,
         html,
-        text,
         attachments,
       });
       return true;
@@ -298,7 +283,6 @@ export async function sendParkingEmail({
           to: toEmail,
           subject,
           html,
-          text,
           attachments,
         });
         return true;

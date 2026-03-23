@@ -25,7 +25,7 @@ function runTests() {
   assert.equal(isChatWindowOpen(makeReport({ status: "pending" }), NOW), true);
   assert.equal(
     isChatWindowOpen(
-      makeReport({ status: "chatting", created_at: new Date(NOW - 121 * 1000).toISOString() }),
+      makeReport({ status: "chatting", created_at: new Date(NOW - 61 * 1000).toISOString() }),
       NOW
     ),
     false
@@ -62,7 +62,7 @@ function runTests() {
 
   assert.equal(
     canReporterRevealOwnerPhone(
-      makeReport({ status: "email_sent", created_at: new Date(NOW - 5 * 60 * 1000).toISOString() }),
+      makeReport({ status: "email_sent", created_at: new Date(NOW - 2 * 60 * 1000).toISOString() }),
       "reporter-id",
       NOW
     ),
@@ -72,7 +72,7 @@ function runTests() {
     canReporterRevealOwnerPhone(
       makeReport({
         status: "email_sent",
-        created_at: new Date(NOW - (5 * 60 * 1000 - 1000)).toISOString(),
+        created_at: new Date(NOW - (2 * 60 * 1000 - 1000)).toISOString(),
       }),
       "reporter-id",
       NOW

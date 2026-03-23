@@ -26,7 +26,7 @@ export function isChatWindowOpen(report: ParkingReportAccessRow | null, nowMs = 
   if (!["pending", "chatting"].includes(report.status)) return false;
   const createdMs = getCreatedAtMs(report.created_at);
   if (!createdMs) return false;
-  return nowMs - createdMs < 2 * 60 * 1000;
+  return nowMs - createdMs < 1 * 60 * 1000;
 }
 
 export function canOwnerAcknowledgeReport(
@@ -58,7 +58,7 @@ export function canReporterRevealOwnerPhone(
   if (report.status !== "email_sent") return false;
   const createdMs = getCreatedAtMs(report.created_at);
   if (!createdMs) return false;
-  return nowMs - createdMs >= 5 * 60 * 1000;
+  return nowMs - createdMs >= 2 * 60 * 1000;
 }
 
 export function canReporterMarkUnresolved(

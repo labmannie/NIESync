@@ -209,6 +209,24 @@ function getStageCountdown(report: ParkingReportRow | null, nowMs: number) {
     return { display: "—", label: "LIVE TIMER", progress: 0, ringColor: "#888888" };
   }
 
+  if (report.status === "acknowledged") {
+    return {
+      display: "—",
+      label: "OWNER ACKNOWLEDGED",
+      progress: 1,
+      ringColor: "#22c55e",
+    };
+  }
+
+  if (report.status === "resolved") {
+    return {
+      display: "—",
+      label: "RESOLVED",
+      progress: 1,
+      ringColor: "#22c55e",
+    };
+  }
+
   const chatElapsed = getElapsedSeconds(report.created_at, nowMs);
   const emailSentAtMs = parseOptionalDateMs(report.email_sent_at);
 
@@ -547,16 +565,28 @@ function ParkingPatrolPageContent() {
     ? getElapsedSeconds(selectedReport.created_at, synchronizedNowMs)
     : 0;
   const hasEmailSentAt = Boolean(String(selectedReport?.email_sent_at || "").trim());
+  const acknowledgedState = selectedReport?.status === "acknowledged";
   const emailElapsedSeconds =
     selectedReport && hasEmailSentAt
       ? getElapsedSeconds(String(selectedReport.email_sent_at || ""), synchronizedNowMs)
       : 0;
   const callReady =
     Boolean(selectedReport) &&
+    selectedReport?.status === "email_sent" &&
     hasEmailSentAt &&
     (Boolean(selectedReport?.phone_revealed) || emailElapsedSeconds >= EMAIL_TO_CALL_SECONDS);
   const stageCountdown = getStageCountdown(selectedReport, synchronizedNowMs);
-  const stageLineFillPercent = !selectedReport ? 0 : callReady ? 100 : chatElapsedSeconds >= CHAT_WINDOW_SECONDS ? 50 : 0;
+  const stageLineFillPercent = !selectedReport
+    ? 0
+    : acknowledgedState
+      ? hasEmailSentAt
+        ? 50
+        : 0
+      : callReady
+        ? 100
+        : chatElapsedSeconds >= CHAT_WINDOW_SECONDS
+          ? 50
+          : 0;
   const circleRadius = 52;
   const circleLength = 2 * Math.PI * circleRadius;
   const circleOffset = circleLength * (1 - stageCountdown.progress);
@@ -1177,10 +1207,16 @@ function ParkingPatrolPageContent() {
                         />
                         {["Chat", "Email", "Call"].map((label, index) => {
                           const node = index + 1;
-                          const completed =
-                            node === 1 ? chatElapsedSeconds >= CHAT_WINDOW_SECONDS : node === 2 ? callReady : false;
-                          const active =
-                            node === 1
+                          const completed = acknowledgedState
+                            ? node === 1 || (node === 2 && hasEmailSentAt)
+                            : node === 1
+                              ? chatElapsedSeconds >= CHAT_WINDOW_SECONDS
+                              : node === 2
+                                ? callReady
+                                : false;
+                          const active = acknowledgedState
+                            ? false
+                            : node === 1
                               ? chatElapsedSeconds < CHAT_WINDOW_SECONDS
                               : node === 2
                                 ? chatElapsedSeconds >= CHAT_WINDOW_SECONDS && !callReady

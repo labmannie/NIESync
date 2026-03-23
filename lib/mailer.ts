@@ -39,12 +39,18 @@ function resolveTransportPlan(): TransportPlan {
   const smtpUser = requireEnv("GMAIL_USER").trim();
   const smtpPassword = requireEnv("GMAIL_APP_PASSWORD").trim();
   const emailDomain = smtpUser.split("@")[1]?.toLowerCase() || "";
+  const baseTimeoutConfig = {
+    connectionTimeout: 7000,
+    greetingTimeout: 7000,
+    socketTimeout: 12000,
+  };
 
   if (emailDomain === "gmail.com" || emailDomain === "googlemail.com") {
     return {
       user: smtpUser,
       primary: {
         service: "gmail",
+        ...baseTimeoutConfig,
         auth: {
           user: smtpUser,
           pass: smtpPassword,
@@ -68,6 +74,7 @@ function resolveTransportPlan(): TransportPlan {
         host: primaryHost,
         port: 465,
         secure: true,
+        ...baseTimeoutConfig,
         auth: {
           user: smtpUser,
           pass: smtpPassword,
@@ -77,6 +84,7 @@ function resolveTransportPlan(): TransportPlan {
         host: fallbackHost,
         port: 465,
         secure: true,
+        ...baseTimeoutConfig,
         auth: {
           user: smtpUser,
           pass: smtpPassword,
@@ -91,6 +99,7 @@ function resolveTransportPlan(): TransportPlan {
       host: `smtp.${emailDomain}`,
       port: 465,
       secure: true,
+      ...baseTimeoutConfig,
       auth: {
         user: smtpUser,
         pass: smtpPassword,
@@ -159,8 +168,8 @@ export async function sendParkingEmail({
 
   const subject = "NIE Sync | Parking Report Action Required";
   const { user: smtpUser, primary, fallback } = getTransporters();
-  const preferredFrom = process.env.PARKING_FROM_EMAIL || `NIE Campus Sync <${smtpUser}>`;
-  const authenticatedFrom = `NIE Campus Sync <${smtpUser}>`;
+  const brandedFromName = String(process.env.PARKING_FROM_NAME || "NIE Campus Sync").trim() || "NIE Campus Sync";
+  const authenticatedFrom = `${brandedFromName} <${smtpUser}>`;
   const photoSection = safePhotoUrl
     ? `
                 <tr>
@@ -279,7 +288,7 @@ export async function sendParkingEmail({
   const sendUsingTransporter = async (transporter: nodemailer.Transporter) => {
     try {
       await transporter.sendMail({
-        from: preferredFrom,
+        from: authenticatedFrom,
         to: toEmail,
         subject,
         html,
@@ -288,24 +297,8 @@ export async function sendParkingEmail({
       return true;
     } catch (error) {
       lastError = error;
+      return false;
     }
-
-    if (preferredFrom !== authenticatedFrom) {
-      try {
-        await transporter.sendMail({
-          from: authenticatedFrom,
-          to: toEmail,
-          subject,
-          html,
-          attachments,
-        });
-        return true;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-
-    return false;
   };
 
   const sentWithPrimary = await sendUsingTransporter(primary);

@@ -350,25 +350,35 @@ export async function runParkingEscalation(appBaseUrl: string): Promise<ParkingE
 
   let emailSendTotalMs = 0;
 
-  for (const report of (reports || []) as EscalationReportRow[]) {
-    const result = await escalateReportRow(supabase, report, normalizedBaseUrl);
-    if (result.escalated) {
-      summary.escalated += 1;
-      if (typeof result.sendMs === "number") {
-        summary.emailSendStats.count += 1;
-        emailSendTotalMs += result.sendMs;
-        summary.emailSendStats.maxMs = Math.max(summary.emailSendStats.maxMs, result.sendMs);
-      }
-      continue;
-    }
+  const queue = [...((reports || []) as EscalationReportRow[])];
+  const workerCount = Math.min(3, Math.max(1, queue.length));
 
-    if (result.error) {
-      summary.failures.push({
-        reportId: report.id,
-        error: result.error,
-      });
+  const runWorker = async () => {
+    while (queue.length > 0) {
+      const report = queue.shift();
+      if (!report) break;
+
+      const result = await escalateReportRow(supabase, report, normalizedBaseUrl);
+      if (result.escalated) {
+        summary.escalated += 1;
+        if (typeof result.sendMs === "number") {
+          summary.emailSendStats.count += 1;
+          emailSendTotalMs += result.sendMs;
+          summary.emailSendStats.maxMs = Math.max(summary.emailSendStats.maxMs, result.sendMs);
+        }
+        continue;
+      }
+
+      if (result.error) {
+        summary.failures.push({
+          reportId: report.id,
+          error: result.error,
+        });
+      }
     }
-  }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 
   if (summary.emailSendStats.count > 0) {
     summary.emailSendStats.avgMs = Math.round(emailSendTotalMs / summary.emailSendStats.count);

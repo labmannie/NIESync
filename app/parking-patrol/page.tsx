@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -30,6 +30,7 @@ import {
   revealParkingPhoneAction,
   sendParkingMessageAction,
   submitParkingReportAction,
+  triggerParkingEscalationAction,
 } from "@/app/parking-patrol/actions";
 import {
   canReporterCancelReport,
@@ -65,6 +66,13 @@ type ParkingMessageRow = {
   sender_role: "reporter" | "owner" | "system";
   message: string;
   created_at: string;
+};
+
+type ProfileIdentityRow = {
+  id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
 };
 
 type UnmatchedReportSnapshot = {
@@ -215,7 +223,7 @@ function getStageCountdown(report: ParkingReportRow | null, nowMs: number) {
 
   if (report.status === "acknowledged") {
     return {
-      display: "—",
+      display: "MOVED",
       label: "OWNER ACKNOWLEDGED",
       progress: 1,
       ringColor: "#22c55e",
@@ -224,7 +232,7 @@ function getStageCountdown(report: ParkingReportRow | null, nowMs: number) {
 
   if (report.status === "resolved") {
     return {
-      display: "—",
+      display: "OK",
       label: "RESOLVED",
       progress: 1,
       ringColor: "#22c55e",
@@ -238,7 +246,7 @@ function getStageCountdown(report: ParkingReportRow | null, nowMs: number) {
     const remaining = Math.max(0, CHAT_WINDOW_SECONDS - chatElapsed);
     return {
       display: formatCountdown(remaining),
-      label: "CHAT WINDOW",
+      label: "OWNER RESPONSE",
       progress: Math.min(1, chatElapsed / CHAT_WINDOW_SECONDS),
       ringColor: "#22c55e",
     };
@@ -246,7 +254,7 @@ function getStageCountdown(report: ParkingReportRow | null, nowMs: number) {
 
   if (!emailSentAtMs) {
     return {
-      display: "—",
+      display: "WAIT",
       label: "EMAIL DISPATCH",
       progress: 0.1,
       ringColor: "#f59e0b",
@@ -267,7 +275,7 @@ function getStageCountdown(report: ParkingReportRow | null, nowMs: number) {
   }
 
   return {
-    display: "—",
+    display: "NOW",
     label: "CALL READY",
     progress: 1,
     ringColor: "#ef4444",
@@ -573,10 +581,40 @@ function buildUnmatchedReportHtml(report: UnmatchedReportSnapshot, appBaseUrl: s
   `.trim();
 }
 
-function getThreadRoleLabel(message: ParkingMessageRow) {
+function formatThreadParticipantTag(participant: ProfileIdentityRow) {
+  const username = String(participant.username || "").trim();
+  if (username) return `@${username}`;
+  const firstName = String(participant.first_name || "").trim();
+  const lastName = String(participant.last_name || "").trim();
+  const fullName = `${firstName} ${lastName}`.trim();
+  return fullName;
+}
+
+function getThreadRoleLabel(
+  message: ParkingMessageRow,
+  selectedReport: ParkingReportRow | null,
+  viewerUserId: string,
+  participantTagById: Record<string, string>
+) {
   if (message.sender_role === "system") return "SYSTEM";
-  if (message.sender_role === "reporter") return "YOU";
-  return "VEHICLE OWNER";
+  if (!selectedReport) {
+    return message.sender_role === "owner" ? "VEHICLE OWNER" : "REPORTER";
+  }
+
+  const viewerIsReporter = selectedReport.reported_by === viewerUserId;
+  const viewerIsOwner = selectedReport.matched_owner_id === viewerUserId;
+
+  if (message.sender_role === "reporter") {
+    if (viewerIsReporter) return "YOU";
+    const reporterId = String(selectedReport.reported_by || "");
+    const participantTag = participantTagById[reporterId] || "";
+    return participantTag ? `REPORTER (${participantTag})` : "REPORTER";
+  }
+
+  if (viewerIsOwner) return "YOU";
+  const ownerId = String(selectedReport.matched_owner_id || "");
+  const participantTag = participantTagById[ownerId] || "";
+  return participantTag ? `OWNER (${participantTag})` : "VEHICLE OWNER";
 }
 
 function ParkingPatrolPageContent() {
@@ -619,13 +657,23 @@ function ParkingPatrolPageContent() {
     {}
   );
   const [reportPhotoUrlById, setReportPhotoUrlById] = useState<Record<string, string>>({});
+  const [participantTagById, setParticipantTagById] = useState<Record<string, string>>({});
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const escalationSyncInFlightRef = useRef(false);
+  const escalatedReportsRef = useRef<Set<string>>(new Set());
 
   const reportIdFromQuery = searchParams.get("report") || "";
 
-  const loadReports = useCallback(async (showLoader = false) => {
+  const loadReports = useCallback(async (viewerId: string, showLoader = false) => {
+    if (!viewerId) {
+      setReports([]);
+      setSelectedReportId("");
+      if (showLoader) setIsLoadingReports(false);
+      return;
+    }
+
     if (showLoader) {
       setIsLoadingReports(true);
     }
@@ -635,9 +683,10 @@ function ParkingPatrolPageContent() {
       .select(
         "id, reported_by, license_plate, plate_normalized, location_description, matched_owner_id, status, phone_revealed, email_sent_at, acknowledged_at, resolved_at, created_at, photo_url, ocr_raw_text"
       )
+      .or(`reported_by.eq.${viewerId},matched_owner_id.eq.${viewerId}`)
       .in("status", ["pending", "chatting", "acknowledged", "email_sent"])
       .order("created_at", { ascending: false })
-      .limit(80);
+      .limit(24);
 
     if (error) {
       if (error.code === "42P01") {
@@ -658,10 +707,10 @@ function ParkingPatrolPageContent() {
     const rows = (data || []) as ParkingReportRow[];
     setReports(rows);
     setSelectedReportId((current) => {
+      if (current && rows.some((report) => report.id === current)) return current;
       if (reportIdFromQuery && rows.some((report) => report.id === reportIdFromQuery)) {
         return reportIdFromQuery;
       }
-      if (current && rows.some((report) => report.id === current)) return current;
       return rows[0]?.id || "";
     });
 
@@ -669,6 +718,12 @@ function ParkingPatrolPageContent() {
       setIsLoadingReports(false);
     }
   }, [supabase, reportIdFromQuery]);
+
+  useEffect(() => {
+    if (reportIdFromQuery && reports.some(r => r.id === reportIdFromQuery)) {
+      setSelectedReportId(reportIdFromQuery);
+    }
+  }, [reportIdFromQuery, reports]);
 
   const loadMessages = useCallback(
     async (reportId: string) => {
@@ -695,6 +750,21 @@ function ParkingPatrolPageContent() {
     },
     [supabase]
   );
+
+  const triggerEscalationSync = useCallback(async () => {
+    if (escalationSyncInFlightRef.current) return;
+    escalationSyncInFlightRef.current = true;
+    try {
+      const origin =
+        typeof window !== "undefined" ? window.location.origin.replace(/\/$/, "") : "";
+      const result = await triggerParkingEscalationAction(origin);
+      if (!result.ok && result.error) {
+        console.error("Escalation sync failed:", result.error);
+      }
+    } finally {
+      escalationSyncInFlightRef.current = false;
+    }
+  }, []);
 
   const syncServerClock = useCallback(async () => {
     const { data, error } = await supabase.rpc("parking_server_now");
@@ -738,20 +808,31 @@ function ParkingPatrolPageContent() {
   useEffect(() => {
     let active = true;
 
-    const bootstrap = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
+    const applySessionState = async (nextUserId: string, showLoader = false) => {
       if (!active) return;
-      setUserId(user?.id || "");
-      setIsLoggedIn(Boolean(user?.id));
-      await loadReports(true);
+      setUserId(nextUserId);
+      setIsLoggedIn(Boolean(nextUserId));
+      await loadReports(nextUserId, showLoader);
+    };
+
+    const bootstrap = async () => {
+      const result = await supabase.auth.getSession();
+      const session = result?.data?.session;
+
+      const resolvedUserId = session?.user?.id || "";
+      await applySessionState(resolvedUserId, true);
     };
 
     void bootstrap();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const resolvedUserId = session?.user?.id || "";
+      await applySessionState(resolvedUserId, false);
+    });
+
     return () => {
       active = false;
+      authListener.subscription.unsubscribe();
     };
   }, [supabase, loadReports]);
 
@@ -761,6 +842,22 @@ function ParkingPatrolPageContent() {
       return;
     }
     void loadMessages(selectedReportId);
+  }, [selectedReportId, loadMessages]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !userId) return;
+    const poll = window.setInterval(() => {
+      void loadReports(userId, false);
+    }, 2000);
+    return () => window.clearInterval(poll);
+  }, [isLoggedIn, userId, loadReports]);
+
+  useEffect(() => {
+    if (!selectedReportId) return;
+    const poll = window.setInterval(() => {
+      void loadMessages(selectedReportId);
+    }, 2000);
+    return () => window.clearInterval(poll);
   }, [selectedReportId, loadMessages]);
 
   useEffect(() => {
@@ -777,7 +874,7 @@ function ParkingPatrolPageContent() {
           filter: `reported_by=eq.${userId}`,
         },
         () => {
-          void loadReports(false);
+          void loadReports(userId, false);
         }
       )
       .on(
@@ -789,7 +886,7 @@ function ParkingPatrolPageContent() {
           filter: `matched_owner_id=eq.${userId}`,
         },
         () => {
-          void loadReports(false);
+          void loadReports(userId, false);
         }
       )
       .subscribe();
@@ -826,6 +923,7 @@ function ParkingPatrolPageContent() {
   const selectedReport = reports.find((report) => report.id === selectedReportId) || null;
   const synchronizedNowMs = clockMs + serverClockOffsetMs;
   const isReporter = selectedReport?.reported_by === userId;
+  const isOwner = selectedReport?.matched_owner_id === userId;
   const chatWindowOpen = isChatWindowOpen(selectedReport, synchronizedNowMs);
   const isChatReadOnly = Boolean(
     !selectedReport ||
@@ -875,6 +973,24 @@ function ParkingPatrolPageContent() {
   const circleOffset = circleLength * (1 - stageCountdown.progress);
 
   useEffect(() => {
+    if (!isLoggedIn || !userId) return;
+
+    const dueCandidates = reports.filter((report) => {
+      if (report.reported_by !== userId) return false;
+      if (!["pending", "chatting"].includes(String(report.status || ""))) return false;
+      if (String(report.email_sent_at || "").trim()) return false;
+      if (getElapsedSeconds(report.created_at, synchronizedNowMs) < 55) return false;
+      if (escalatedReportsRef.current.has(report.id)) return false;
+      return true;
+    });
+
+    if (dueCandidates.length === 0) return;
+
+    dueCandidates.forEach(c => escalatedReportsRef.current.add(c.id));
+    void triggerEscalationSync();
+  }, [isLoggedIn, reports, synchronizedNowMs, triggerEscalationSync, userId]);
+
+  useEffect(() => {
     if (!messageListRef.current) return;
     messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
   }, [messages, selectedReport?.id]);
@@ -897,6 +1013,40 @@ function ParkingPatrolPageContent() {
       cancelled = true;
     };
   }, [selectedReport?.id, selectedReport?.photo_url, reportPhotoUrlById]);
+
+  useEffect(() => {
+    const reporterId = String(selectedReport?.reported_by || "");
+    const ownerId = String(selectedReport?.matched_owner_id || "");
+    const participantIds = Array.from(new Set([reporterId, ownerId].filter(Boolean)));
+    if (participantIds.length === 0) return;
+
+    let cancelled = false;
+
+    const loadParticipantTags = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, username, first_name, last_name")
+        .in("id", participantIds);
+
+      if (cancelled || error) return;
+
+      const tagMap: Record<string, string> = {};
+      ((data || []) as ProfileIdentityRow[]).forEach((row) => {
+        const tag = formatThreadParticipantTag(row);
+        if (tag) {
+          tagMap[row.id] = tag;
+        }
+      });
+
+      setParticipantTagById((prev) => ({ ...prev, ...tagMap }));
+    };
+
+    void loadParticipantTags();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedReport?.id, selectedReport?.reported_by, selectedReport?.matched_owner_id, supabase]);
 
   const runOcr = async (image: Blob) => {
     setIsRunningOcr(true);
@@ -1027,9 +1177,14 @@ function ParkingPatrolPageContent() {
     setPhotoPreview("");
     setReportPanelOpen(false);
 
-    await loadReports();
+    if (userId) await loadReports(userId);
     if (result.reportId && !result.unmatched) {
       setSelectedReportId(result.reportId);
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => {
+          void triggerEscalationSync();
+        }, 65000);
+      }
     } else {
       setSelectedReportId("");
     }
@@ -1086,7 +1241,7 @@ function ParkingPatrolPageContent() {
 
     setThreadDraft("");
     await loadMessages(selectedReport.id);
-    await loadReports();
+    if (userId) await loadReports(userId);
   };
 
   const handleOwnerAcknowledge = async () => {
@@ -1102,7 +1257,7 @@ function ParkingPatrolPageContent() {
       return;
     }
 
-    await loadReports();
+    if (userId) await loadReports(userId);
     await loadMessages(selectedReport.id);
   };
 
@@ -1119,7 +1274,7 @@ function ParkingPatrolPageContent() {
       return;
     }
 
-    await loadReports();
+    if (userId) await loadReports(userId);
     await loadMessages(selectedReport.id);
   };
 
@@ -1140,7 +1295,7 @@ function ParkingPatrolPageContent() {
     setCancelConfirmOpen(false);
     setCancelTargetReportId("");
     setThreadDraft("");
-    await loadReports();
+    if (userId) await loadReports(userId);
     setMessages([]);
   };
 
@@ -1163,7 +1318,7 @@ function ParkingPatrolPageContent() {
       return;
     }
 
-    await loadReports();
+    if (userId) await loadReports(userId);
     await loadMessages(selectedReport.id);
   };
 
@@ -1187,7 +1342,7 @@ function ParkingPatrolPageContent() {
     }
 
     setRevealedPhoneByReport((prev) => ({ ...prev, [selectedReport.id]: phone }));
-    await loadReports();
+    if (userId) await loadReports(userId);
     await loadMessages(selectedReport.id);
 
     if (typeof window !== "undefined") {
@@ -1209,7 +1364,7 @@ function ParkingPatrolPageContent() {
     ];
 
     const body = messages.map((message) => {
-      const label = getThreadRoleLabel(message);
+      const label = getThreadRoleLabel(message, selectedReport, userId, participantTagById);
       return `[${new Date(message.created_at).toLocaleString()}] ${label}: ${message.message}`;
     });
 
@@ -1319,7 +1474,7 @@ function ParkingPatrolPageContent() {
             ) : null}
             {unmatchedReport ? (
               <div className="mt-3 rounded-2xl border border-amber-400/35 bg-gradient-to-br from-amber-400/15 via-amber-500/5 to-sky-500/10 p-4 text-center shadow-[0_20px_45px_rgba(8,12,20,0.45)]">
-                <p className="text-3xl">⚠️</p>
+                <p className="text-3xl">??</p>
                 <p className="mt-2 text-base font-black tracking-tight text-white">Vehicle not registered in NIE Sync</p>
                 <p className="mt-1 text-xs leading-relaxed text-[#bbb]">
                   Keep this report for records and use the branded PDF for campus-security follow-up.
@@ -1521,12 +1676,12 @@ function ParkingPatrolPageContent() {
                         "polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%)",
                     }}
                   >
-                    <div className="px-1 pb-4 sm:px-4">
+                    <div className="px-2 pb-4 sm:px-5">
                       <div className="relative flex items-start justify-between">
-                        <div className="absolute left-0 right-0 top-3 h-[1px] bg-white/10" />
+                        <div className="absolute left-3 right-3 top-3 h-[2px] rounded-full bg-white/10" />
                         <div
-                          className="absolute left-0 top-3 h-[1px] bg-gradient-to-r from-green-400 via-[#f5a623] to-[#ef4444] transition-all"
-                          style={{ width: `${stageLineFillPercent}%` }}
+                          className="absolute left-3 top-3 h-[2px] rounded-full bg-gradient-to-r from-green-400 via-[#f5a623] to-[#ef4444] transition-all duration-500 ease-out"
+                          style={{ width: `calc((100% - 24px) * ${Math.max(0, Math.min(100, stageLineFillPercent)) / 100})` }}
                         />
                         {["Chat", "Email", "Call"].map((label, index) => {
                           const node = index + 1;
@@ -1556,7 +1711,7 @@ function ParkingPatrolPageContent() {
                               : "text-[#555]";
                           return (
                             <div key={label} className="relative z-10 flex flex-col items-center gap-1.5">
-                              <span className={`h-6 w-6 rounded-full border-2 ${nodeClass}`} />
+                              <span className={`h-6 w-6 rounded-full border-2 shadow-[0_0_0_4px_#161616] transition-colors ${nodeClass}`} />
                               <span className={`text-[9px] font-bold uppercase tracking-[0.12em] sm:text-[10px] ${textClass}`}>
                                 {label}
                               </span>
@@ -1692,14 +1847,6 @@ function ParkingPatrolPageContent() {
                 </div>
 
                 <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#111]">
-                  {!chatWindowOpen &&
-                  (selectedReport.status === "pending" ||
-                    selectedReport.status === "chatting") ? (
-                    <div className="border-b border-white/[0.06] bg-blue-500/10 px-4 py-2 text-xs text-blue-300">
-                      Chat window closed after 1 minute. Escalation email is being dispatched.
-                    </div>
-                  ) : null}
-
                   <div
                     ref={messageListRef}
                     className="max-h-64 space-y-3 overflow-y-auto overscroll-contain p-4 scroll-smooth"
@@ -1718,16 +1865,19 @@ function ParkingPatrolPageContent() {
                           );
                         }
 
-                        const isReporterMessage = message.sender_role === "reporter";
+                        const isOwnMessage = message.sender_id
+                          ? message.sender_id === userId
+                          : (isReporter && message.sender_role === "reporter") ||
+                            (isOwner && message.sender_role === "owner");
                         return (
-                          <div key={message.id} className={isReporterMessage ? "flex justify-end" : "flex justify-start"}>
+                          <div key={message.id} className={isOwnMessage ? "flex justify-end" : "flex justify-start"}>
                             <div className="max-w-[80%]">
-                              <p className={`mb-1 text-[10px] text-[#555] ${isReporterMessage ? "text-right" : ""}`}>
-                                {getThreadRoleLabel(message)}
+                              <p className={`mb-1 text-[10px] text-[#555] ${isOwnMessage ? "text-right" : ""}`}>
+                                {getThreadRoleLabel(message, selectedReport, userId, participantTagById)}
                               </p>
                               <div
                                 className={`rounded-2xl px-4 py-2.5 text-sm ${
-                                  isReporterMessage
+                                  isOwnMessage
                                     ? "rounded-tr-sm border border-[#f5a623]/20 bg-[#f5a623]/15 text-[#f5a623]"
                                     : "rounded-tl-sm border border-white/[0.06] bg-white/[0.04] text-[#ccc]"
                                 }`}
@@ -1859,3 +2009,5 @@ export default function ParkingPatrolPage() {
     </Suspense>
   );
 }
+
+

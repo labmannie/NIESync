@@ -1,32 +1,113 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/utils/supabase/client";
-import { User, Mail, Camera, Save, MapPin, Loader2, ArrowLeft, ArrowRight, Car, Edit2, X, Phone, Plus, Eye, EyeOff, Check, Download, Trash2, Laptop, Monitor, Smartphone, LogOut, AlertTriangle, ShieldAlert } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  normalizePhoneNumber,
-  validateRequiredPhoneNumber,
-} from "@/lib/phone";
-import {
-  formatOwnerVehiclePlateInput,
-  getOwnerVehiclePlateFormatsHint,
-  validateOwnerVehiclePlate,
-} from "@/lib/vehiclePlate";
-import 'react-phone-number-input/style.css';
-import PhoneInput from 'react-phone-number-input';
-import { GoogleMark } from "@/app/_components/GoogleMark";
+  Camera,
+  CheckCircle2,
+  Edit3,
+  Loader2,
+  Phone,
+  Save,
+  X,
+} from "lucide-react";
+import { createClient } from "@/utils/supabase/client";
+import { normalizePhoneNumber, validateRequiredPhoneNumber } from "@/lib/phone";
+import PhoneInput from "react-phone-number-input";
+import "react-phone-number-input/style.css";
+
+type ProfileRow = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  username: string | null;
+  phone: string | null;
+  usn: string | null;
+  user_type: string | null;
+  batch: string | null;
+  year_of_study: string | null;
+  role: string | null;
+  campus: string | null;
+  hostel_name: string | null;
+  room_no: string | null;
+  avatar_url: string | null;
+};
+
+type ProfileDraft = {
+  firstName: string;
+  lastName: string;
+  username: string;
+  phone: string;
+  usn: string;
+  userType: string;
+  batch: string;
+  year: string;
+  role: string;
+  campus: string;
+  hostelName: string;
+  roomNo: string;
+};
+
+const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
 
 const BATCH_OPTIONS = ["ISE", "CSE", "CSE(AI/ML)", "MECHANICAL", "CIVIL", "ECE", "EEE", "OTHER"];
 const YEAR_OPTIONS = ["I Year", "II Year", "III Year", "IV Year"];
-const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
+const ROLE_OPTIONS = ["Day Scholar", "Hostelite", "Faculty"];
 
-function isVehicleAlreadyRegisteredError(error: any) {
-  const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
-  return error?.code === "23505" && details.includes("vehicle");
+function formatMemberSince(value?: string | null) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+function normalizeUsername(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "");
+}
+
+function resolveDisplayName(profile: ProfileRow | null) {
+  const first = String(profile?.first_name || "").trim();
+  const last = String(profile?.last_name || "").trim();
+  const fullName = `${first} ${last}`.trim();
+  if (fullName) return fullName;
+
+  const username = String(profile?.username || "").trim();
+  if (username) return `@${username}`;
+
+  return "Profile";
+}
+
+function resolveInitials(profile: ProfileRow | null) {
+  const first = String(profile?.first_name || "").trim();
+  const last = String(profile?.last_name || "").trim();
+  const initials = `${first.charAt(0)}${last.charAt(0)}`.toUpperCase();
+  if (initials) return initials;
+
+  const username = String(profile?.username || "").trim();
+  if (username) return username.slice(0, 2).toUpperCase();
+
+  return "U";
+}
+
+function toDraft(profile: ProfileRow | null): ProfileDraft {
+  return {
+    firstName: String(profile?.first_name || ""),
+    lastName: String(profile?.last_name || ""),
+    username: String(profile?.username || ""),
+    phone: String(profile?.phone || ""),
+    usn: String(profile?.usn || ""),
+    userType: String(profile?.user_type || "Student"),
+    batch: String(profile?.batch || ""),
+    year: String(profile?.year_of_study || ""),
+    role: String(profile?.role || "Day Scholar"),
+    campus: String(profile?.campus || "South Campus"),
+    hostelName: String(profile?.hostel_name || "NIE North Boys Hostel"),
+    roomNo: String(profile?.room_no || ""),
+  };
 }
 
 function isUsernameAlreadyTakenError(error: any) {
@@ -34,1334 +115,482 @@ function isUsernameAlreadyTakenError(error: any) {
   return error?.code === "23505" && details.includes("username");
 }
 
-function formatMemberSince(createdAt?: string | null) {
-  if (!createdAt) return "";
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
-}
-
-function normalizeUsername(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9_]/g, "");
-}
-
-function getBrowserName(userAgent: string) {
-  if (/Edg\//i.test(userAgent)) return "Edge";
-  if (/OPR\//i.test(userAgent)) return "Opera";
-  if (/Chrome\//i.test(userAgent)) return "Chrome";
-  if (/Safari\//i.test(userAgent) && !/Chrome\//i.test(userAgent)) return "Safari";
-  if (/Firefox\//i.test(userAgent)) return "Firefox";
-  return "Browser";
-}
-
-function getOperatingSystem(userAgent: string) {
-  if (/Mac OS X|Macintosh/i.test(userAgent)) return "macOS";
-  if (/Windows/i.test(userAgent)) return "Windows";
-  if (/Android/i.test(userAgent)) return "Android";
-  if (/iPhone|iPad|iPod/i.test(userAgent)) return "iOS";
-  if (/Linux/i.test(userAgent)) return "Linux";
-  return "Unknown OS";
-}
-
-function getLocationFromTimezone(timeZone?: string) {
-  if (!timeZone) return "Unknown Location";
-  if (timeZone === "Asia/Kolkata") return "Bengaluru, IN";
-
-  const zoneParts = timeZone.split("/");
-  const city = zoneParts[zoneParts.length - 1]?.replace(/_/g, " ");
-  const region = zoneParts[0]?.replace(/_/g, " ");
-  if (!city) return "Unknown Location";
-  return region ? `${city}, ${region}` : city;
-}
-
-function formatDateTime(timestamp?: string | null) {
-  if (!timestamp) return "";
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("en-IN", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function SkeletonBlock({ className }: { className: string }) {
-  return <div className={`skeleton-shimmer rounded-xl ${className}`} aria-hidden="true" />;
-}
-
-type SessionDeviceRow = {
-  id: string;
-  session_id: string;
-  user_agent: string | null;
-  ip_address: string | null;
-  location_label: string | null;
-  created_at: string;
-  last_seen_at: string;
-  revoked_at: string | null;
-};
-
-type ParkingReportSummary = {
-  total: number;
-  active: number;
-  resolved: number;
-  asReporter: number;
-  asOwner: number;
-};
-
-function extractSessionIdFromJwt(accessToken?: string | null) {
-  if (!accessToken) return "";
-
-  const payload = accessToken.split(".")[1];
-  if (!payload) return "";
-
-  try {
-    const normalizedBase64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-    if (typeof window === "undefined") return "";
-    const decoded = window.atob(normalizedBase64);
-    const parsed = JSON.parse(decoded);
-    return String(parsed?.session_id || "");
-  } catch {
-    return "";
-  }
-}
-
-function formatSessionDeviceLabel(userAgent?: string | null) {
-  const raw = String(userAgent || "");
-  if (!raw) return "Unknown Device";
-  const browser = getBrowserName(raw);
-  const os = getOperatingSystem(raw);
-  return `${browser} on ${os}`;
-}
-
-function getSessionLocationLabel(row: SessionDeviceRow) {
-  const explicitLocation = String(row.location_label || "").trim();
-  if (explicitLocation) return explicitLocation;
-  const ip = String(row.ip_address || "").trim();
-  return ip ? `IP ${ip}` : "Location unavailable";
-}
-
-function isWithinLast24Hours(timestamp?: string | null) {
-  if (!timestamp) return false;
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return false;
-  const elapsed = Date.now() - date.getTime();
-  return elapsed <= 24 * 60 * 60 * 1000;
-}
-
 export default function ProfilePage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
-  const [isProfileLoading, setIsProfileLoading] = useState(true);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [profile, setProfile] = useState<any>(null);
-  const [authUser, setAuthUser] = useState<any>(null);
-  const [additionalVehicles, setAdditionalVehicles] = useState<Array<{ id: string; vehicle_no: string; vehicle_type?: string; vehicle_brand_model?: string; vehicle_color?: string }>>([]);
+  const [userId, setUserId] = useState("");
+  const [userEmail, setUserEmail] = useState("");
   const [memberSince, setMemberSince] = useState("");
-  const [email, setEmail] = useState("");
-  const [activeSession, setActiveSession] = useState("");
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [draft, setDraft] = useState<ProfileDraft>(toDraft(null));
 
-  const [isUploading, setIsUploading] = useState(false);
-  const [isSavingPhone, setIsSavingPhone] = useState(false);
-  const [isEditingPhone, setIsEditingPhone] = useState(false);
-  const [phoneDraft, setPhoneDraft] = useState("");
-  const [isDownloadingData, setIsDownloadingData] = useState(false);
-  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
-  const [deleteConsentChecked, setDeleteConsentChecked] = useState(false);
-  const [sessions, setSessions] = useState<SessionDeviceRow[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState("");
-  const [isSessionsLoading, setIsSessionsLoading] = useState(false);
-  const [sessionActionId, setSessionActionId] = useState("");
-  const [isSigningOutOthers, setIsSigningOutOthers] = useState(false);
-  const [parkingReportSummary, setParkingReportSummary] = useState<ParkingReportSummary>({
-    total: 0,
-    active: 0,
-    resolved: 0,
-    asReporter: 0,
-    asOwner: 0,
-  });
-  const [isParkingSummaryLoading, setIsParkingSummaryLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState({
-    firstName: "",
-    lastName: "",
-    batch: "",
-    year: "",
-    username: "",
-    phone: "",
-    role: "",
-    campus: "",
-    hostelName: "",
-    roomNo: "",
-    hasVehicle: false,
-    vehicleNo: "",
-    vehicleType: "" as "" | "2-Wheeler" | "4-Wheeler",
-    vehicleBrandModel: "",
-    vehicleColor: ""
-  });
-  const [editAdditionalVehicles, setEditAdditionalVehicles] = useState<Array<{ vehicleNo: string; vehicleType: string; vehicleBrandModel: string; vehicleColor: string }>>([]);
-  const [linkPassword, setLinkPassword] = useState("");
-  const [showLinkPassword, setShowLinkPassword] = useState(false);
-  const [isLinkingPassword, setIsLinkingPassword] = useState(false);
-  const [isSendingVerificationEmail, setIsSendingVerificationEmail] = useState(false);
-  const [isSendingResetEmail, setIsSendingResetEmail] = useState(false);
-
   useEffect(() => {
-    fetchProfile();
-  }, []);
+    let active = true;
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const userAgent = window.navigator.userAgent || "";
-    const browser = getBrowserName(userAgent);
-    const os = getOperatingSystem(userAgent);
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const location = getLocationFromTimezone(timezone);
-    setActiveSession(`${browser} on ${os} - ${location}`);
-  }, []);
-
-  const loadSessions = async (userId: string, activeSessionId: string) => {
-    setIsSessionsLoading(true);
-    try {
-      const { data, error: sessionsError } = await supabase
-        .from("auth_session_devices")
-        .select("id, session_id, user_agent, ip_address, location_label, created_at, last_seen_at, revoked_at")
-        .eq("user_id", userId)
-        .order("last_seen_at", { ascending: false })
-        .limit(25);
-
-      if (sessionsError) {
-        if (sessionsError.code === "42P01") {
-          setSessions([]);
-          return;
-        }
-        throw sessionsError;
-      }
-
-      const nextSessions = (data || []) as SessionDeviceRow[];
-      setSessions(nextSessions);
-
-      const currentSession = nextSessions.find((item) => item.session_id === activeSessionId);
-      if (currentSession) {
-        const deviceLabel = formatSessionDeviceLabel(currentSession.user_agent);
-        const locationLabel = getSessionLocationLabel(currentSession);
-        setActiveSession(`${deviceLabel} - ${locationLabel}`);
-      }
-    } catch (sessionsError: any) {
-      console.error("Error loading sessions:", sessionsError?.message || sessionsError);
-    } finally {
-      setIsSessionsLoading(false);
-    }
-  };
-
-  const loadParkingReportSummary = useCallback(async (userId: string) => {
-    setIsParkingSummaryLoading(true);
-    try {
-      const { data, error: reportsError } = await supabase
-        .from("parking_reports")
-        .select("id, status, reported_by, matched_owner_id")
-        .limit(200);
-
-      if (reportsError) {
-        if (reportsError.code === "42P01") {
-          setParkingReportSummary({
-            total: 0,
-            active: 0,
-            resolved: 0,
-            asReporter: 0,
-            asOwner: 0,
-          });
-          return;
-        }
-        throw reportsError;
-      }
-
-      const rows = (data || []) as Array<{
-        id: string;
-        status: string;
-        reported_by: string | null;
-        matched_owner_id: string | null;
-      }>;
-      const activeStatuses = new Set(["pending", "chatting", "acknowledged", "email_sent"]);
-      const nextSummary: ParkingReportSummary = {
-        total: rows.length,
-        active: rows.filter((row) => activeStatuses.has(String(row.status || ""))).length,
-        resolved: rows.filter((row) => String(row.status || "") === "resolved").length,
-        asReporter: rows.filter((row) => row.reported_by === userId).length,
-        asOwner: rows.filter((row) => row.matched_owner_id === userId).length,
-      };
-
-      setParkingReportSummary(nextSummary);
-    } catch (reportsError: any) {
-      console.error("Error loading parking reports:", reportsError?.message || reportsError);
-    } finally {
-      setIsParkingSummaryLoading(false);
-    }
-  }, [supabase]);
-
-  useEffect(() => {
-    const userId = String(authUser?.id || "");
-    if (!userId) return;
-
-    const channel = supabase
-      .channel(`profile-parking-summary-${userId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "parking_reports" },
-        () => {
-          void loadParkingReportSummary(userId);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [authUser?.id, supabase, loadParkingReportSummary]);
-
-  const fetchProfile = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-      setAuthUser(user);
-      setMemberSince(formatMemberSince(user.created_at));
-      setEmail(user.email || "");
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const resolvedSessionId = extractSessionIdFromJwt(session?.access_token);
-      setCurrentSessionId(resolvedSessionId);
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (error) throw error;
-      setProfile(data);
-      setPhoneDraft(data?.phone || "");
-
-      const { data: extraVehicles, error: extraVehiclesError } = await supabase
-        .from("profile_vehicles")
-        .select("id, vehicle_no, vehicle_type, vehicle_brand_model, vehicle_color")
-        .eq("profile_id", user.id)
-        .order("created_at", { ascending: true });
-
-      if (extraVehiclesError && extraVehiclesError.code !== "42P01") {
-        throw extraVehiclesError;
-      }
-
-      setAdditionalVehicles(extraVehicles || []);
-      await loadSessions(user.id, resolvedSessionId);
-      await loadParkingReportSummary(user.id);
-    } catch (error: any) {
-      console.error("Error fetching profile:", error.message);
-    } finally {
-      setIsProfileLoading(false);
-    }
-  };
-
-  const startEditing = () => {
-    setEditForm({
-      firstName: profile?.first_name || "",
-      lastName: profile?.last_name || "",
-      batch: profile?.batch || "",
-      year: profile?.year_of_study || "",
-      username: profile?.username || "",
-      phone: profile?.phone || "",
-      role: profile?.role || "Day Scholar",
-      campus: profile?.campus || "South Campus",
-      hostelName: profile?.hostel_name || "NIE North Boys Hostel",
-      roomNo: profile?.room_no || "",
-      hasVehicle: profile?.has_vehicle || false,
-      vehicleNo: profile?.vehicle_no || "",
-      vehicleType: profile?.vehicle_type || "",
-      vehicleBrandModel: profile?.vehicle_brand_model || "",
-      vehicleColor: profile?.vehicle_color || ""
-    });
-    setEditAdditionalVehicles(additionalVehicles.map((vehicle) => ({
-      vehicleNo: vehicle.vehicle_no,
-      vehicleType: vehicle.vehicle_type || "",
-      vehicleBrandModel: vehicle.vehicle_brand_model || "",
-      vehicleColor: vehicle.vehicle_color || ""
-    })));
-    setIsEditing(true);
-    setError("");
-    setSuccess("");
-  };
-
-  const handleSendVerificationEmail = async () => {
-    if (!email) {
-      setError("Unable to find your email for verification.");
-      return;
-    }
-
-    setIsSendingVerificationEmail(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: false,
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=/profile&verify_email=1`,
-        },
-      });
-
-      if (otpError) throw otpError;
-
-      setSuccess("Verification link sent. Please check your NIE email inbox.");
-    } catch (err: any) {
-      setError(err.message || "Failed to send verification email.");
-    } finally {
-      setIsSendingVerificationEmail(false);
-    }
-  };
-
-  const startInlinePhoneEdit = () => {
-    setPhoneDraft(profile?.phone || "");
-    setIsEditingPhone(true);
-    setError("");
-    setSuccess("");
-  };
-
-  const cancelInlinePhoneEdit = () => {
-    setPhoneDraft(profile?.phone || "");
-    setIsEditingPhone(false);
-  };
-
-  const handleInlinePhoneSave = async () => {
-    setIsSavingPhone(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
-        phoneDraft,
-        { invalidMessage: "Please enter a valid phone number." }
-      );
-      if (phoneError) throw new Error(phoneError);
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ phone: normalizedPhone })
-        .eq("id", user.id);
-
-      if (updateError) throw updateError;
-
-      setProfile((prev: any) => ({ ...prev, phone: normalizedPhone }));
-      setEditForm((prev) => ({ ...prev, phone: normalizedPhone }));
-      setPhoneDraft(normalizedPhone);
-      setIsEditingPhone(false);
-      setSuccess("Phone number updated.");
-    } catch (err: any) {
-      setError(err.message || "Unable to save phone number.");
-    } finally {
-      setIsSavingPhone(false);
-    }
-  };
-
-  const handleDownloadData = async () => {
-    setIsDownloadingData(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) throw new Error("You need to be logged in to export your data.");
-
-      const [
-        { data: profileData, error: profileError },
-        { data: vehiclesData, error: vehiclesError },
-        { data: sessionsData, error: sessionsError },
-      ] = await Promise.all([
-        supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
-        supabase.from("profile_vehicles").select("*").eq("profile_id", user.id).order("created_at", { ascending: true }),
-        supabase
-          .from("auth_session_devices")
-          .select("id, session_id, user_agent, ip_address, location_label, created_at, last_seen_at, revoked_at")
-          .eq("user_id", user.id)
-          .order("last_seen_at", { ascending: false }),
-      ]);
-
-      if (profileError) throw profileError;
-      if (vehiclesError && vehiclesError.code !== "42P01") throw vehiclesError;
-      if (sessionsError && sessionsError.code !== "42P01") throw sessionsError;
-
-      const payload = {
-        exported_at: new Date().toISOString(),
-        source: "NIE Sync",
-        auth: {
-          id: user.id,
-          email: user.email,
-          created_at: user.created_at,
-          last_sign_in_at: user.last_sign_in_at,
-          app_metadata: user.app_metadata,
-          user_metadata: user.user_metadata,
-        },
-        profile: profileData,
-        vehicles: vehiclesData || [],
-        sessions: sessionsData || [],
-      };
-
-      const fileContent = JSON.stringify(payload, null, 2);
-      const blob = new Blob([fileContent], { type: "application/json" });
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `niesync-data-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
-
-      setSuccess("Your account data export is ready.");
-    } catch (err: any) {
-      setError(err.message || "Unable to download your data right now.");
-    } finally {
-      setIsDownloadingData(false);
-    }
-  };
-
-  const openDeleteAccountModal = () => {
-    setDeleteConfirmationText("");
-    setDeleteConsentChecked(false);
-    setError("");
-    setIsDeleteModalOpen(true);
-  };
-
-  const closeDeleteAccountModal = () => {
-    if (isDeletingAccount) return;
-    setIsDeleteModalOpen(false);
-  };
-
-  const handleReauthenticateForDeletion = async () => {
-    setError("");
-    await supabase.auth.signOut({ scope: "local" });
-    router.push("/login?reauth=delete-account");
-  };
-
-  const handleDeleteAccount = async () => {
-    const isRecentLogin = isWithinLast24Hours(authUser?.last_sign_in_at);
-    if (!isRecentLogin) {
-      setError("For account safety, please sign in again. Last login must be within the past 24 hours.");
-      return;
-    }
-
-    if (deleteConfirmationText.trim().toUpperCase() !== "DELETE") {
-      setError("Type DELETE to confirm account deletion.");
-      return;
-    }
-
-    if (!deleteConsentChecked) {
-      setError("Please confirm that you understand this action is permanent.");
-      return;
-    }
-
-    setIsDeletingAccount(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const response = await fetch("/auth/callback?action=delete-account", {
-        method: "DELETE",
-      });
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(payload?.error || "Unable to delete account right now.");
-      }
+    const bootstrap = async () => {
+      setIsLoading(true);
+      setError("");
 
       try {
-        await supabase.auth.signOut({ scope: "local" });
-      } catch {
-        // Session can already be invalidated by account deletion.
-      }
+        const result = await supabase.auth.getSession();
+        const user = result?.data?.session?.user || null;
 
-      setIsDeleteModalOpen(false);
-      router.replace("/login?account=deleted");
-    } catch (err: any) {
-      setError(err.message || "Unable to delete account right now.");
-    } finally {
-      setIsDeletingAccount(false);
-    }
-  };
+        if (!active) return;
 
-  const handleRemoteSessionLogout = async (targetSessionId: string) => {
-    if (!authUser?.id) return;
-
-    setSessionActionId(targetSessionId);
-    setError("");
-    setSuccess("");
-
-    try {
-      if (targetSessionId === currentSessionId) {
-        await supabase.auth.signOut({ scope: "local" });
-        router.replace("/login?session=logged-out");
-        return;
-      }
-
-      const now = new Date().toISOString();
-      const { error: revokeError } = await supabase
-        .from("auth_session_devices")
-        .update({ revoked_at: now })
-        .eq("user_id", authUser.id)
-        .eq("session_id", targetSessionId);
-
-      if (revokeError) {
-        if (revokeError.code === "42P01") {
-          throw new Error("Session tracking is not configured in Supabase yet.");
+        if (!user) {
+          window.location.href = "/login";
+          return;
         }
-        throw revokeError;
+
+        setUserId(user.id);
+        setUserEmail(user.email || "");
+        setMemberSince(formatMemberSince(user.created_at));
+
+        const { data, error: profileError } = await supabase
+          .from("profiles")
+          .select(
+            "id, first_name, last_name, username, phone, usn, user_type, batch, year_of_study, role, campus, hostel_name, room_no, avatar_url, email_verified"
+          )
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!active) return;
+
+        if (profileError) {
+          throw profileError;
+        }
+
+        const row = (data || null) as ProfileRow | null;
+        setProfile(row);
+        setDraft(toDraft(row));
+      } catch (bootstrapError: any) {
+        if (!active) return;
+        setError(bootstrapError?.message || "Unable to load profile details.");
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
       }
+    };
 
-      await loadSessions(authUser.id, currentSessionId);
-      setSuccess("Session revoked. That device will be logged out on its next request.");
-    } catch (sessionError: any) {
-      setError(sessionError?.message || "Unable to revoke the session right now.");
-    } finally {
-      setSessionActionId("");
-    }
-  };
+    void bootstrap();
 
-  const handleLogoutOtherSessions = async () => {
-    if (!authUser?.id) return;
+    return () => {
+      active = false;
+    };
+  }, [router, supabase]);
 
-    setIsSigningOutOthers(true);
-    setError("");
-    setSuccess("");
+  const handleAvatarUpload = async (file: File) => {
+    if (!userId) return;
 
-    try {
-      await supabase.auth.signOut({ scope: "others" });
-      if (currentSessionId) {
-        const { error: revokeError } = await supabase
-          .from("auth_session_devices")
-          .update({ revoked_at: new Date().toISOString() })
-          .eq("user_id", authUser.id)
-          .neq("session_id", currentSessionId)
-          .is("revoked_at", null);
-
-        if (revokeError && revokeError.code !== "42P01") throw revokeError;
-      }
-      await loadSessions(authUser.id, currentSessionId);
-      setSuccess("Signed out all other active sessions.");
-    } catch (sessionError: any) {
-      setError(sessionError?.message || "Unable to sign out other sessions.");
-    } finally {
-      setIsSigningOutOthers(false);
-    }
-  };
-
-  const addAnotherVehicleField = () => {
-    setEditAdditionalVehicles((prev) => [...prev, { vehicleNo: "", vehicleType: "", vehicleBrandModel: "", vehicleColor: "" }]);
-  };
-
-  const updateAdditionalVehicleField = (index: number, field: string, value: string) => {
-    setEditAdditionalVehicles((prev) =>
-      prev.map((item, itemIndex) =>
-        itemIndex === index
-          ? { ...item, [field]: field === "vehicleNo" ? formatOwnerVehiclePlateInput(value) : value }
-          : item
-      )
-    );
-  };
-
-  const removeAdditionalVehicleField = (index: number) => {
-    setEditAdditionalVehicles((prev) =>
-      prev.filter((_, itemIndex) => itemIndex !== index)
-    );
-  };
-
-  const handleLinkPassword = async () => {
-    if (linkPassword.length < 6) {
-      setError("Password must be at least 6 characters to link password login.");
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Profile photo must be under 5MB.");
       return;
     }
 
-    setIsLinkingPassword(true);
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setError("Use JPG, PNG, or WEBP image format.");
+      return;
+    }
+
+    setIsUploadingAvatar(true);
     setError("");
     setSuccess("");
 
     try {
-      const { error: linkError } = await supabase.auth.updateUser({
-        password: linkPassword,
+      const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const path = `${userId}/${Date.now()}-avatar.${extension}`;
+
+      const { error: uploadError } = await supabase.storage.from("avatars").upload(path, file, {
+        cacheControl: "3600",
+        upsert: true,
       });
-
-      if (linkError) throw linkError;
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
-          .from("profiles")
-          .update({ auth_provider: "both" })
-          .eq("id", user.id);
-      }
-
-      setProfile((prev: any) => ({ ...prev, auth_provider: "both" }));
-      setLinkPassword("");
-      setSuccess("Password login linked successfully. You can now use Google or password for this same account.");
-    } catch (err: any) {
-      setError(err.message || "Unable to link password login right now.");
-    } finally {
-      setIsLinkingPassword(false);
-    }
-  };
-
-  const handleSave = async () => {
-    setIsSavingProfile(true);
-    setError("");
-    setSuccess("");
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      const normalizedUsername = normalizeUsername(editForm.username || "").trim();
-      if (normalizedUsername && !USERNAME_REGEX.test(normalizedUsername)) {
-        throw new Error("Username must be 3-20 characters and use only lowercase letters, numbers, or underscore.");
-      }
-
-      if (!editForm.firstName.trim() || !editForm.lastName.trim()) {
-        throw new Error("First name and last name are required.");
-      }
-
-      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
-        editForm.phone || "",
-        { invalidMessage: "Please enter a valid phone number." }
-      );
-      if (phoneError) throw new Error(phoneError);
-
-      const primaryVehicleValidation = editForm.hasVehicle
-        ? validateOwnerVehiclePlate(editForm.vehicleNo, {
-          required: true,
-          requiredMessage: "Vehicle number is required if you have a vehicle.",
-        })
-        : { plate: "", error: "" };
-      if (primaryVehicleValidation.error) throw new Error(primaryVehicleValidation.error);
-      if (editForm.role === "Hostelite" && !editForm.roomNo) {
-        throw new Error("Room number is required for hostelites.");
-      }
-
-      const normalizedAdditionalVehicles = editForm.hasVehicle
-        ? editAdditionalVehicles
-          .map((v) => {
-            const vehicleNoDraft = formatOwnerVehiclePlateInput(v.vehicleNo);
-            if (!vehicleNoDraft) return null;
-            const validation = validateOwnerVehiclePlate(vehicleNoDraft, {
-              required: true,
-              invalidMessage: `Each additional vehicle must be a valid Indian plate. ${getOwnerVehiclePlateFormatsHint()}`,
-            });
-            if (validation.error) {
-              throw new Error(validation.error);
-            }
-            return {
-              ...v,
-              vehicleNo: validation.plate,
-            };
-          })
-          .filter((v): v is { vehicleNo: string; vehicleType: string; vehicleBrandModel: string; vehicleColor: string } => Boolean(v))
-        : [];
-
-      const duplicateVehicleValues = new Set<string>();
-      for (const v of normalizedAdditionalVehicles) {
-        if (v.vehicleNo === primaryVehicleValidation.plate) {
-          throw new Error("Primary and additional vehicles cannot be the same.");
-        }
-        if (duplicateVehicleValues.has(v.vehicleNo)) {
-          throw new Error("Duplicate additional vehicle numbers are not allowed.");
-        }
-        duplicateVehicleValues.add(v.vehicleNo);
-      }
-
-      const updates = {
-        first_name: editForm.firstName.trim(),
-        last_name: editForm.lastName.trim(),
-        batch: editForm.batch || null,
-        year_of_study: editForm.year || null,
-        username: normalizedUsername || null,
-        phone: normalizedPhone,
-        role: editForm.role,
-        campus: editForm.role === "Hostelite" ? null : editForm.campus,
-        hostel_name: editForm.role === "Hostelite" ? editForm.hostelName : null,
-        room_no: editForm.role === "Hostelite" ? editForm.roomNo : null,
-        has_vehicle: editForm.hasVehicle,
-        vehicle_no: editForm.hasVehicle ? primaryVehicleValidation.plate : null,
-        vehicle_type: editForm.hasVehicle ? (editForm.vehicleType || null) : null,
-        vehicle_brand_model: editForm.hasVehicle ? (editForm.vehicleBrandModel.trim() || null) : null,
-        vehicle_color: editForm.hasVehicle ? (editForm.vehicleColor.trim() || null) : null
-      };
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update(updates)
-        .eq("id", user.id);
-
-      if (updateError) throw updateError;
-
-      const { error: deleteExtraVehiclesError } = await supabase
-        .from("profile_vehicles")
-        .delete()
-        .eq("profile_id", user.id);
-
-      if (deleteExtraVehiclesError && deleteExtraVehiclesError.code !== "42P01") {
-        throw deleteExtraVehiclesError;
-      }
-
-      if (normalizedAdditionalVehicles.length > 0) {
-        const { error: insertExtraVehiclesError } = await supabase
-          .from("profile_vehicles")
-          .insert(
-            normalizedAdditionalVehicles.map((v) => ({
-              profile_id: user.id,
-              vehicle_no: v.vehicleNo,
-              vehicle_type: v.vehicleType || null,
-              vehicle_brand_model: v.vehicleBrandModel.trim() || null,
-              vehicle_color: v.vehicleColor.trim() || null,
-            }))
-          );
-
-        if (insertExtraVehiclesError) throw insertExtraVehiclesError;
-      }
-
-      const { data: refreshedAdditionalVehicles } = await supabase
-        .from("profile_vehicles")
-        .select("id, vehicle_no, vehicle_type, vehicle_brand_model, vehicle_color")
-        .eq("profile_id", user.id)
-        .order("created_at", { ascending: true });
-
-      setAdditionalVehicles(refreshedAdditionalVehicles || []);
-      setPhoneDraft(normalizedPhone);
-      setEditForm((prev) => ({ ...prev, phone: normalizedPhone }));
-      setProfile({ ...profile, ...updates });
-      setIsEditing(false);
-      setSuccess("Profile updated successfully.");
-    } catch (err: any) {
-      if (isVehicleAlreadyRegisteredError(err)) {
-        setError("This vehicle is already registered to another profile.");
-      } else if (isUsernameAlreadyTakenError(err)) {
-        setError("This username is already taken. Please choose another username.");
-      } else {
-        setError(err.message);
-      }
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
-
-  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    try {
-      setError("");
-      setSuccess("");
-
-      if (!event.target.files || event.target.files.length === 0) {
-        return;
-      }
-
-      const file = event.target.files[0];
-
-      if (file.size > 2 * 1024 * 1024) {
-        setError("Image size must be strictly under 2MB.");
-        return;
-      }
-
-      if (!file.type.startsWith("image/")) {
-        setError("Only valid image files are allowed.");
-        return;
-      }
-
-      setIsUploading(true);
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Authentication failed");
-
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${user.id}-${Math.random()}.${fileExt}`;
-      const filePath = `${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(filePath, file, { upsert: true });
 
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(filePath);
+      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+      const avatarUrl = String(data.publicUrl || "");
 
       const { error: updateError } = await supabase
         .from("profiles")
-        .update({ avatar_url: publicUrl })
-        .eq("id", user.id);
+        .update({ avatar_url: avatarUrl })
+        .eq("id", userId);
 
       if (updateError) throw updateError;
 
-      setProfile({ ...profile, avatar_url: publicUrl });
-      setSuccess("Profile picture updated securely!");
-
-    } catch (error: any) {
-      setError(error.message);
+      setProfile((prev) => (prev ? { ...prev, avatar_url: avatarUrl } : prev));
+      setSuccess("Profile photo updated.");
+    } catch (uploadError: any) {
+      setError(uploadError?.message || "Unable to upload profile photo.");
     } finally {
-      setIsUploading(false);
+      setIsUploadingAvatar(false);
     }
   };
 
-  if (isProfileLoading) {
+  const handleSaveProfile = async () => {
+    if (!userId) return;
+
+    setIsSaving(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const normalizedUsername = normalizeUsername(draft.username).trim();
+      if (normalizedUsername && !USERNAME_REGEX.test(normalizedUsername)) {
+        throw new Error("Username must be 3-20 chars and can use lowercase letters, numbers, underscore.");
+      }
+
+      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(draft.phone, {
+        invalidMessage: "Please provide a valid phone number.",
+      });
+      if (phoneError) {
+        throw new Error(phoneError);
+      }
+
+      const firstName = String(draft.firstName || "").trim();
+      const lastName = String(draft.lastName || "").trim();
+      if (!firstName || !lastName) {
+        throw new Error("First name and last name are required.");
+      }
+
+      const role = String(draft.role || "Day Scholar").trim();
+      const isHostelite = role === "Hostelite";
+
+      const payload = {
+        first_name: firstName,
+        last_name: lastName,
+        username: normalizedUsername || null,
+        phone: normalizePhoneNumber(normalizedPhone),
+        usn: String(draft.usn || "").trim().toUpperCase() || null,
+        user_type: String(draft.userType || "Student") || null,
+        batch: String(draft.batch || "").trim() || null,
+        year_of_study: String(draft.year || "").trim() || null,
+        role,
+        campus: isHostelite ? null : String(draft.campus || "").trim() || null,
+        hostel_name: isHostelite ? String(draft.hostelName || "").trim() || null : null,
+        room_no: isHostelite ? String(draft.roomNo || "").trim() || null : null,
+      };
+
+      const { error: updateError } = await supabase.from("profiles").update(payload).eq("id", userId);
+
+      if (updateError) {
+        if (isUsernameAlreadyTakenError(updateError)) {
+          throw new Error("This username is already taken.");
+        }
+        throw updateError;
+      }
+
+      setProfile((prev) => (prev ? { ...prev, ...payload } : prev));
+      setDraft((prev) => ({ ...prev, username: normalizedUsername, phone: payload.phone || "" }));
+      setIsEditing(false);
+      setSuccess("Profile updated.");
+    } catch (saveError: any) {
+      setError(saveError?.message || "Unable to save profile.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const displayName = resolveDisplayName(profile);
+  const profileInitials = resolveInitials(profile);
+
+  if (isLoading) {
     return (
-      <main className="relative flex min-h-screen justify-center bg-campus-black pb-20 text-white">
-        <div className="absolute left-0 top-0 h-[300px] w-full overflow-hidden pointer-events-none before:absolute before:inset-0 before:bg-gradient-to-b before:from-transparent before:to-campus-black z-0">
-          <div className="absolute -top-[100px] left-1/2 h-[400px] w-full max-w-4xl -translate-x-1/2 rounded-full bg-accent-blue/10 blur-[120px]" />
-        </div>
-
-        <div className="relative z-10 w-full max-w-6xl px-4 pt-28 md:px-8 lg:px-10">
-          <div className="mb-8 flex items-center justify-between">
-            <SkeletonBlock className="h-8 w-32 rounded-xl" />
-            <SkeletonBlock className="h-10 w-36 rounded-xl" />
-          </div>
-
-          <div className="skeleton-surface relative overflow-hidden rounded-3xl p-6 md:p-10">
-            <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-accent-blue via-cyan-400 to-transparent" />
-            <div className="flex flex-col items-start gap-6 md:flex-row md:gap-8">
-              <SkeletonBlock className="h-32 w-32 rounded-full md:h-40 md:w-40" />
-
-              <div className="w-full flex-1 space-y-5">
-                <div className="space-y-3">
-                  <SkeletonBlock className="h-12 w-full max-w-xl rounded-xl" />
-                  <SkeletonBlock className="h-8 w-48 rounded-full" />
-                  <SkeletonBlock className="h-4 w-44 rounded-lg" />
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <SkeletonBlock className="h-9 w-72 rounded-xl" />
-                  <SkeletonBlock className="h-9 w-44 rounded-xl" />
-                  <SkeletonBlock className="h-9 w-44 rounded-xl" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-6 lg:grid-cols-2">
-            <div className="skeleton-surface space-y-4 rounded-3xl p-6">
-              <SkeletonBlock className="h-5 w-56 rounded-lg" />
-              <SkeletonBlock className="h-11 w-full rounded-xl" />
-              <SkeletonBlock className="h-11 w-full rounded-xl" />
-              <SkeletonBlock className="h-11 w-3/4 rounded-xl" />
-            </div>
-            <div className="skeleton-surface space-y-4 rounded-3xl p-6">
-              <SkeletonBlock className="h-5 w-48 rounded-lg" />
-              <SkeletonBlock className="h-20 w-full rounded-2xl" />
-              <SkeletonBlock className="h-16 w-full rounded-2xl" />
-              <SkeletonBlock className="h-4 w-2/3 rounded-lg" />
-            </div>
-          </div>
-
-          <div className="mt-6 skeleton-surface space-y-4 rounded-3xl p-6">
-            <SkeletonBlock className="h-5 w-52 rounded-lg" />
-            <SkeletonBlock className="h-14 w-full rounded-2xl" />
-            <div className="flex flex-col gap-3 md:flex-row">
-              <SkeletonBlock className="h-11 w-full rounded-xl md:w-48" />
-              <SkeletonBlock className="h-11 w-full rounded-xl md:w-48" />
-            </div>
-          </div>
+      <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+        <div className="mx-auto w-full max-w-5xl animate-pulse space-y-5">
+          <div className="h-36 rounded-3xl border border-white/10 bg-white/[0.03]" />
+          <div className="h-72 rounded-3xl border border-white/10 bg-white/[0.03]" />
         </div>
       </main>
     );
   }
 
-  const authProviders = new Set<string>();
-  const metadataProviders = Array.isArray(authUser?.app_metadata?.providers)
-    ? authUser.app_metadata.providers
-    : [];
-  metadataProviders.forEach((provider: string) => {
-    if (provider) authProviders.add(String(provider).toLowerCase());
-  });
-  if (authUser?.app_metadata?.provider) {
-    authProviders.add(String(authUser.app_metadata.provider).toLowerCase());
-  }
-  const authProviderFromProfile = String(profile?.auth_provider || "").toLowerCase();
-  if (authProviderFromProfile === "both") {
-    authProviders.add("google");
-    authProviders.add("email");
-  } else if (authProviderFromProfile) {
-    authProviders.add(authProviderFromProfile);
-  }
-
-  const hasGoogleProvider = authProviders.has("google");
-  const hasEmailProvider = authProviders.has("email");
-  const isGoogleOnlyAccount = hasGoogleProvider && !hasEmailProvider;
-  const isEmailVerified = Boolean(profile?.email_verified);
-  const isVerifiedUser = hasGoogleProvider || isEmailVerified;
-  const verificationMethodText = hasEmailProvider
-    ? "Verified via NIE Sync Access Link."
-    : "Verified via Google Sign-In.";
-  const activeSessions = sessions.filter((item) => !item.revoked_at);
-  const previousSessions = sessions.filter((item) => Boolean(item.revoked_at));
-  const lastSignInAt = authUser?.last_sign_in_at || null;
-  const isRecentLogin = isWithinLast24Hours(lastSignInAt);
-  const canConfirmDelete =
-    deleteConfirmationText.trim().toUpperCase() === "DELETE" &&
-    deleteConsentChecked &&
-    isRecentLogin;
-
   return (
-    <main className="min-h-screen bg-campus-black text-white relative flex justify-center pb-20">
-
-      {/* Dynamic Backgrounds */}
-      <div className="absolute top-0 left-0 w-full h-[300px] overflow-hidden pointer-events-none before:absolute before:inset-0 before:bg-gradient-to-b before:from-transparent before:to-campus-black z-0">
-        <div className="absolute -top-[100px] left-1/2 -translate-x-1/2 w-full max-w-4xl h-[400px] bg-accent-blue/10 blur-[120px] rounded-full" />
-      </div>
-
-      <div className="w-full max-w-5xl pt-28 px-4 md:px-8 lg:px-10 relative z-10">
-
-        {/* Navigation Return */}
-        <div className="flex justify-between items-center mb-8">
-          <Link href="/lost-and-found" className="inline-flex items-center gap-2 text-text-secondary hover:text-white transition-colors text-xs font-bold uppercase tracking-wider">
-            <ArrowLeft className="w-4 h-4" />
-            Gateway
-          </Link>
-
-          {!isEditing ? (
-            <button
-              onClick={startEditing}
-              className="inline-flex items-center gap-2 text-accent-blue hover:text-white transition-colors text-xs font-bold uppercase tracking-wider bg-accent-blue/10 hover:bg-accent-blue/20 px-4 py-2 rounded-sm border border-accent-blue/20"
-            >
-              <Edit2 className="w-4 h-4" />
-              Advanced Edit
-            </button>
-          ) : (
-            <div className="flex gap-3">
-              <button
-                onClick={() => setIsEditing(false)}
-                className="inline-flex items-center gap-2 text-text-secondary hover:text-white transition-colors text-xs font-bold uppercase tracking-wider px-4 py-2"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={isSavingProfile}
-                className="inline-flex items-center gap-2 text-white bg-green-500 hover:bg-green-600 transition-colors text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-sm disabled:opacity-60"
-              >
-                {isSavingProfile ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+    <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+      <div className="mx-auto w-full max-w-5xl">
+        <motion.header
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28 }}
+          className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7"
+        >
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-4">
+              <label className="group relative inline-flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/[0.05]">
+                {profile?.avatar_url ? (
+                  <Image src={profile.avatar_url} alt={displayName} fill className="object-cover" />
                 ) : (
-                  <Save className="w-4 h-4" />
+                  <span className="text-xl font-black uppercase text-white/90">{profileInitials}</span>
                 )}
-                {isSavingProfile ? "Saving..." : "Save"}
-              </button>
+                <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                  {isUploadingAvatar ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Camera className="h-5 w-5" />
+                  )}
+                </span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  disabled={isUploadingAvatar}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      void handleAvatarUpload(file);
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-text-secondary">Profile Overview</p>
+                <h1 className="mt-1 flex items-center text-2xl font-black tracking-tight md:text-4xl">
+                  {displayName}
+                  {userEmail.toLowerCase().endsWith("@nie.ac.in") && profile?.email_verified && (
+                    <motion.span
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ 
+                        scale: 1, 
+                        opacity: 1,
+                        rotate: 360
+                      }}
+                      whileHover={{ scale: 1.15, filter: "drop-shadow(0 0 8px rgba(29, 155, 240, 0.6))" }}
+                      transition={{ 
+                        rotate: { repeat: Infinity, duration: 15, ease: "linear" },
+                        scale: { type: "spring", stiffness: 260, damping: 15, delay: 0.1 }
+                      }}
+                      className="ml-3 inline-flex items-center justify-center text-[#1d9bf0]"
+                      title="Verified Campus Member"
+                    >
+                      <svg viewBox="0 0 24 24" className="h-6 w-6 md:h-7 md:w-7" fill="currentColor">
+                        <path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.154-.435.238-.905.238-1.4 0-2.21-1.71-3.998-3.918-3.998-.47 0-.92.084-1.336.25C14.818 2.415 13.51 1.5 12 1.5s-2.816.917-3.337 2.25c-.416-.165-.866-.25-1.336-.25-2.21 0-3.918 1.792-3.918 3.998 0 .495.084.965.238 1.4-1.273.65-2.148 2.02-2.148 3.6 0 1.52.816 2.846 2.026 3.522-.05.31-.076.63-.076.953 0 2.21 1.71 3.998 3.918 3.998.47 0 .92-.084 1.336-.25C9.182 21.585 10.49 22.5 12 22.5s2.816-.917 3.337-2.25c.416.165.866.25 1.336.25 2.21 0 3.918-1.792 3.918-3.998 0-.323-.027-.643-.076-.953 1.21-.676 2.026-2.002 2.026-3.522zm-12.062 4.417c-.36.36-.946.36-1.306 0l-3.36-3.36c-.36-.36-.36-.945 0-1.305.36-.36.945-.36 1.305 0l2.707 2.707 6.02-6.02c.36-.36.945-.36 1.305 0 .36.36.36.946 0 1.306l-6.67 6.672z"></path>
+                      </svg>
+                    </motion.span>
+                  )}
+                </h1>
+                <p className="mt-1 text-sm text-text-secondary">{userEmail || "No email found"}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.12em] text-white/45">
+                  Member since {memberSince || "-"}
+                </p>
+              </div>
             </div>
-          )}
-        </div>
 
-        {/* Profile Header Block */}
-        <div className="glass-card p-6 md:p-10 rounded-sm border border-white/10 flex flex-col md:flex-row items-start gap-6 md:gap-8 relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent-blue via-cyan-400 to-transparent"></div>
-
-          {/* Avatar Upload Hub */}
-          <div className="relative group shrink-0 mx-auto md:mx-0">
-            <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border border-white/20 bg-black/50 overflow-hidden shadow-2xl relative flex flex-col items-center justify-center transition-all duration-300 group-hover:border-accent-blue scale-100 group-hover:scale-105">
-              {profile?.avatar_url ? (
-                <Image src={profile.avatar_url} alt="Profile Photo" fill className="object-cover" />
+            <div className="flex items-center gap-2">
+              {isEditing ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraft(toDraft(profile));
+                      setIsEditing(false);
+                      setError("");
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.05] px-4 py-2 text-xs font-black uppercase tracking-[0.12em] transition-colors hover:bg-white/[0.1]"
+                  >
+                    <X className="h-4 w-4" />
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveProfile}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.12em] transition-colors hover:bg-white/20 disabled:opacity-60"
+                  >
+                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    {isSaving ? "Saving..." : "Save"}
+                  </button>
+                </>
               ) : (
-                <User className="w-16 h-16 text-white/20" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(toDraft(profile));
+                    setError("");
+                    setSuccess("");
+                    setIsEditing(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.12em] transition-colors hover:bg-white/20"
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Edit Profile
+                </button>
               )}
             </div>
-            {/* Status indicator */}
-            {!isEditing && <div className="absolute bottom-2 right-2 w-4 h-4 rounded-full bg-green-500 border border-campus-black shadow-[0_0_10px_rgba(34,197,94,0.5)]"></div>}
-            {/* Edit Photo Button */}
-            <label
-              htmlFor="avatar-upload-input"
-              className="absolute bottom-2 left-2 w-8 h-8 rounded-full bg-accent-blue/80 hover:bg-accent-blue border border-white/20 flex items-center justify-center cursor-pointer transition-all duration-200 hover:scale-110 shadow-lg z-10"
-              title="Edit Photo"
-            >
-              <Edit2 className="w-4 h-4 text-white" />
-            </label>
-            <input
-              type="file"
-              id="avatar-upload-input"
-              accept="image/*"
-              onChange={handleAvatarUpload}
-              disabled={isUploading}
-              className="hidden"
-            />
           </div>
+        </motion.header>
 
-          <div className="flex-1 w-full min-w-0">
-            <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-              <div className="text-center md:text-left min-w-0">
-                <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tight leading-tight break-words flex flex-wrap items-center justify-center md:justify-start gap-3">
-                  <span>{profile?.first_name} <span className="text-white/40">{profile?.last_name}</span></span>
-                  {/* WhatsApp-style verification badge */}
-                  <div className="relative group shrink-0">
-                    {isVerifiedUser ? (
-                      <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-green-500 flex items-center justify-center shadow-[0_0_12px_rgba(34,197,94,0.5)] transition-transform duration-200 group-hover:scale-110">
-                        <svg viewBox="0 0 24 24" className="w-4 h-4 md:w-5 md:h-5 text-white" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      </div>
-                    ) : (
-                      <div className="w-7 h-7 md:w-8 md:h-8 rounded-full bg-amber-500 flex items-center justify-center shadow-[0_0_12px_rgba(245,158,11,0.5)] transition-transform duration-200 group-hover:scale-110">
-                        <svg viewBox="0 0 24 24" className="w-4 h-4 md:w-5 md:h-5 text-white" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="12" y1="8" x2="12" y2="13" />
-                          <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
-                        </svg>
-                      </div>
-                    )}
-                    {/* Tooltip */}
-                    <div className="absolute -bottom-9 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-20">
-                      <div className={`whitespace-nowrap px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${isVerifiedUser ? 'bg-green-500 text-white' : 'bg-amber-500 text-white'}`}>
-                        {isVerifiedUser ? "Verified" : "Unverified"}
-                      </div>
-                    </div>
-                  </div>
-                </h1>
-                <div className="mt-4 flex flex-col md:flex-row items-center md:items-start gap-3">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                    <span className="text-[10px] uppercase tracking-[0.2em] text-text-secondary font-bold">
-                      Member Since
-                    </span>
-                    <span className="text-xs md:text-sm font-semibold text-white">
-                      {memberSince || "--"}
-                    </span>
-                  </div>
-                  <p className="text-sm md:text-base text-white/85 font-semibold tracking-wide">
-                    {profile?.role} @ NIE
-                  </p>
-                </div>
-                <p className="mt-3 text-xs uppercase tracking-[0.18em] text-text-secondary">
-                  Profile Overview
-                </p>
-              </div>
-
-              <div className="w-full md:w-auto rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left md:text-right">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-text-secondary">
-                  Account State
-                </p>
-                <p className="mt-1 text-sm font-semibold text-white">
-                  {isVerifiedUser ? "Verified Identity" : "Verification Pending"}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {!isEditing && (
-          <section className="mt-6 grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
-            <div className="glass-card rounded-sm border border-white/10 p-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
-                    Contact and Verification
-                  </h2>
-                  <p className="mt-2 text-sm text-white/80">
-                    Keep contact and identity metadata current for faster support and recoveries.
-                  </p>
-                </div>
-                {!hasGoogleProvider && !isEmailVerified && (
-                  <button
-                    type="button"
-                    onClick={handleSendVerificationEmail}
-                    disabled={isSendingVerificationEmail}
-                    className="w-full md:w-auto bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-2 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
-                  >
-                    {isSendingVerificationEmail ? "Sending..." : "Verify Email"}
-                  </button>
-                )}
-              </div>
-
-              <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-wider text-text-secondary">
-                <div className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2">
-                  <Mail className="h-4 w-4" />
-                  <span className="normal-case tracking-normal text-white">{email}</span>
-                </div>
-                {hasGoogleProvider && (
-                  <div className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2 normal-case tracking-normal text-white">
-                    <GoogleMark className="h-4 w-4" />
-                    Connected
-                  </div>
-                )}
-                {hasEmailProvider && (
-                  <div className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2 normal-case tracking-normal text-white">
-                    <Mail className="h-4 w-4 text-accent-blue" />
-                    Direct Access
-                  </div>
-                )}
-                {profile?.username && (
-                  <div className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2">
-                    <span className="text-white/40">USER_</span>
-                    <span className="normal-case tracking-normal text-white">@{profile.username}</span>
-                  </div>
-                )}
-                {isEditingPhone ? (
-                  <div className="flex min-w-[220px] items-center gap-2 rounded-sm border border-accent-blue/40 bg-white/5 px-3 py-2 normal-case tracking-normal text-white">
-                    <Phone className="h-4 w-4 text-accent-blue" />
-                    <PhoneInput
-                      international
-                      defaultCountry="IN"
-                      value={phoneDraft}
-                      onChange={(value) => setPhoneDraft(value || "")}
-                      onBlur={() => setPhoneDraft((prev) => normalizePhoneNumber(prev))}
-                      name="phone"
-                      autoComplete="tel"
-                      inputMode="tel"
-                      className="PhoneInputOverride flex-1 bg-transparent text-xs md:text-sm outline-none placeholder:text-white/30 text-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleInlinePhoneSave}
-                      disabled={isSavingPhone}
-                      className="rounded-sm p-1 text-green-400 transition-colors hover:bg-green-500/10 disabled:opacity-50"
-                      aria-label="Save phone number"
-                    >
-                      {isSavingPhone ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Check className="h-4 w-4" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={cancelInlinePhoneEdit}
-                      disabled={isSavingPhone}
-                      className="rounded-sm p-1 text-text-secondary transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
-                      aria-label="Cancel phone edit"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={startInlinePhoneEdit}
-                    className="flex items-center gap-2 rounded-sm border border-white/5 bg-white/5 px-3 py-2 normal-case tracking-normal transition-colors hover:border-accent-blue/40 hover:text-white"
-                    aria-label="Edit phone number"
-                  >
-                    <Phone className="h-4 w-4" />
-                    <span>{profile?.phone || "Add phone number"}</span>
-                    <Edit2 className="h-3.5 w-3.5 opacity-70" />
-                  </button>
-                )}
-              </div>
-
-              <p
-                className={`mt-4 rounded-sm border p-3 text-sm ${
-                  isVerifiedUser
-                    ? "border-green-500/30 bg-green-500/10 text-green-300"
-                    : "border-accent-amber/30 bg-accent-amber/10 text-accent-amber"
-                }`}
-              >
-                {isVerifiedUser
-                  ? verificationMethodText
-                  : "Unverified account. Complete verification to enable trusted account status."}
-              </p>
-            </div>
-
-            <div className="glass-card rounded-sm border border-white/10 p-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
-                Identity Snapshot
-              </h2>
-              <div className="mt-4 space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-2">
-                  <span className="text-text-secondary">User Type</span>
-                  <span className="font-semibold text-white">{profile?.user_type || "--"}</span>
-                </div>
-                <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-2">
-                  <span className="text-text-secondary">USN</span>
-                  <span className="font-semibold text-white">{profile?.usn || "--"}</span>
-                </div>
-                <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-2">
-                  <span className="text-text-secondary">Batch</span>
-                  <span className="font-semibold text-white">{profile?.batch || "--"}</span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-text-secondary">Current Year</span>
-                  <span className="font-semibold text-white">{profile?.year_of_study || "--"}</span>
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* Status Messaging */}
         <AnimatePresence>
-          {error && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-6 bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-sm text-sm flex items-start gap-2 text-center md:text-left">
-              <span>{error}</span>
+          {error ? (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+            >
+              {error}
             </motion.div>
-          )}
-          {success && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-6 bg-green-500/10 border border-green-500/30 text-green-400 p-4 rounded-sm text-sm flex items-start gap-2 text-center md:text-left">
-              <span>{success}</span>
+          ) : null}
+          {success ? (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-green-500/35 bg-green-500/10 px-4 py-3 text-sm text-green-200"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {success}
             </motion.div>
-          )}
+          ) : null}
         </AnimatePresence>
 
-        {isEditing ? (
-          /* Edit Mode Details */
-          <div className="glass-card p-6 md:p-8 mt-6 rounded-sm border border-white/10 relative">
-            <h3 className="text-sm font-black uppercase tracking-[0.2em] text-white flex items-center gap-2 mb-8">
-              <Edit2 className="w-5 h-5 text-accent-blue" /> Modify Profile Details
-            </h3>
+        <section className="mt-5 rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-6">
+          <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
+            Core Profile Details
+          </h2>
 
-            <div className="grid md:grid-cols-2 gap-8">
-              <div className="md:col-span-2">
-                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-text-secondary">
-                  Identity Details
-                </h4>
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">First Name</label>
-                <input
-                  type="text"
-                  value={editForm.firstName}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, firstName: e.target.value }))}
-                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Last Name</label>
-                <input
-                  type="text"
-                  value={editForm.lastName}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, lastName: e.target.value }))}
-                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Username (Optional)</label>
-                <input
-                  type="text"
-                  value={editForm.username}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, username: normalizeUsername(e.target.value).slice(0, 20) }))}
-                  placeholder="your_handle"
-                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                />
-                <p className="text-[10px] text-text-secondary uppercase tracking-wider">
-                  3-20 chars: lowercase letters, numbers, underscore.
+          {!isEditing ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Name</p>
+                <p className="mt-1 text-sm font-semibold text-white">
+                  {`${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() || "-"}
                 </p>
               </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Username</p>
+                <p className="mt-1 text-sm font-semibold text-white">
+                  {profile?.username ? `@${profile.username}` : "-"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Phone</p>
+                <p className="mt-1 text-sm font-semibold text-white">{profile?.phone || "-"}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">User Type</p>
+                <p className="mt-1 text-sm font-semibold text-white">{profile?.user_type || "-"}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">USN</p>
+                <p className="mt-1 text-sm font-semibold text-white">{profile?.usn || "-"}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Role</p>
+                <p className="mt-1 text-sm font-semibold text-white">{profile?.role || "-"}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Batch</p>
+                <p className="mt-1 text-sm font-semibold text-white">{profile?.batch || "-"}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Year</p>
+                <p className="mt-1 text-sm font-semibold text-white">{profile?.year_of_study || "-"}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3 sm:col-span-2">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Residence</p>
+                <p className="mt-1 text-sm font-semibold text-white">
+                  {profile?.role === "Hostelite"
+                    ? [profile?.hostel_name, profile?.room_no ? `Room ${profile.room_no}` : ""]
+                        .filter(Boolean)
+                        .join(", ") || "-"
+                    : profile?.campus || "-"}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                First Name
+                <input
+                  type="text"
+                  value={draft.firstName}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, firstName: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
+                />
+              </label>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Batch / Branch</label>
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                Last Name
+                <input
+                  type="text"
+                  value={draft.lastName}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, lastName: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
+                />
+              </label>
+
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                Username
+                <input
+                  type="text"
+                  value={draft.username}
+                  onChange={(event) =>
+                    setDraft((prev) => ({
+                      ...prev,
+                      username: normalizeUsername(event.target.value).slice(0, 20),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm lowercase text-white outline-none transition-colors focus:border-accent-blue/50"
+                />
+              </label>
+
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                <span className="inline-flex items-center gap-1">
+                  <Phone className="h-3.5 w-3.5" /> Phone
+                </span>
+                <PhoneInput
+                  international
+                  defaultCountry="IN"
+                  value={draft.phone}
+                  onChange={(value) =>
+                    setDraft((prev) => ({ ...prev, phone: String(value || "") }))
+                  }
+                  onBlur={() =>
+                    setDraft((prev) => ({ ...prev, phone: normalizePhoneNumber(prev.phone) }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus-within:border-accent-blue/50 PhoneInputOverride"
+                />
+              </label>
+
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                User Type
                 <select
-                  value={editForm.batch}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, batch: e.target.value }))}
-                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                  value={draft.userType}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, userType: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
+                >
+                  <option value="Student" className="bg-campus-black">Student</option>
+                  <option value="Faculty" className="bg-campus-black">Faculty</option>
+                </select>
+              </label>
+
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                USN
+                <input
+                  type="text"
+                  value={draft.usn}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, usn: event.target.value.toUpperCase() }))}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
+                />
+              </label>
+
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                Batch
+                <select
+                  value={draft.batch}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, batch: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
                 >
                   <option value="" className="bg-campus-black">Select batch</option>
                   {BATCH_OPTIONS.map((batch) => (
@@ -1370,14 +599,14 @@ export default function ProfilePage() {
                     </option>
                   ))}
                 </select>
-              </div>
+              </label>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Current Year</label>
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                Year
                 <select
-                  value={editForm.year}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, year: e.target.value }))}
-                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                  value={draft.year}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, year: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
                 >
                   <option value="" className="bg-campus-black">Select year</option>
                   {YEAR_OPTIONS.map((year) => (
@@ -1386,737 +615,66 @@ export default function ProfilePage() {
                     </option>
                   ))}
                 </select>
-              </div>
+              </label>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
-                <PhoneInput
-                  international
-                  defaultCountry="IN"
-                  value={editForm.phone}
-                  onChange={(value) => setEditForm(prev => ({ ...prev, phone: value || "" }))}
-                  onBlur={() => setEditForm((prev) => ({ ...prev, phone: normalizePhoneNumber(prev.phone) }))}
-                  name="phone"
-                  autoComplete="tel"
-                  inputMode="tel"
-                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus-within:border-accent-blue/50 transition-colors text-white PhoneInputOverride"
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Campus Status</label>
+              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                Role
                 <select
-                  value={editForm.role}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, role: e.target.value }))}
-                  className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
+                  value={draft.role}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, role: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
                 >
-                  <option value="Day Scholar" className="bg-campus-black">Day Scholar</option>
-                  <option value="Hostelite" className="bg-campus-black">Hostelite</option>
-                  <option value="Faculty" className="bg-campus-black">Faculty</option>
+                  {ROLE_OPTIONS.map((role) => (
+                    <option key={role} value={role} className="bg-campus-black">
+                      {role}
+                    </option>
+                  ))}
                 </select>
-              </div>
+              </label>
 
-              <div className="md:col-span-2 pt-2 border-t border-white/10">
-                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-text-secondary">
-                  Residency
-                </h4>
-              </div>
-              {editForm.role === "Hostelite" ? (
+              {draft.role === "Hostelite" ? (
                 <>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Hostel Name</label>
-                    <select
-                      value={editForm.hostelName}
-                      onChange={(e) => setEditForm(prev => ({ ...prev, hostelName: e.target.value }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer"
-                    >
-                      <option value="NIE North Boys Hostel" className="bg-campus-black">NIE North Boys Hostel</option>
-                      <option value="NIE South Boys Hostel" className="bg-campus-black">NIE South Boys Hostel</option>
-                      <option value="NIE Girls Hostel" className="bg-campus-black">NIE Girls Hostel</option>
-                      <option value="Other Affiliated Hostel" className="bg-campus-black">Other Affiliated Hostel</option>
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Room Number</label>
+                  <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                    Hostel
                     <input
-                      type="text" value={editForm.roomNo} onChange={(e) => setEditForm(prev => ({ ...prev, roomNo: e.target.value }))}
-                      placeholder="Ex: 204-B"
-                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
+                      type="text"
+                      value={draft.hostelName}
+                      onChange={(event) =>
+                        setDraft((prev) => ({ ...prev, hostelName: event.target.value }))
+                      }
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
                     />
-                  </div>
+                  </label>
+
+                  <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                    Room No
+                    <input
+                      type="text"
+                      value={draft.roomNo}
+                      onChange={(event) => setDraft((prev) => ({ ...prev, roomNo: event.target.value }))}
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
+                    />
+                  </label>
                 </>
               ) : (
-                <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Primary Campus</label>
+                <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary sm:col-span-2">
+                  Campus
                   <select
-                    value={editForm.campus}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, campus: e.target.value }))}
-                    className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer"
+                    value={draft.campus}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, campus: event.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
                   >
                     <option value="South Campus" className="bg-campus-black">South Campus</option>
                     <option value="North Campus" className="bg-campus-black">North Campus</option>
                   </select>
-                </div>
-              )}
-
-              <div className="flex flex-col gap-4 md:col-span-2 border-t border-white/10 pt-6 mt-2">
-                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-text-secondary">
-                  Vehicles
-                </h4>
-                <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Do you drive a vehicle to campus?</label>
-                  <div className="flex gap-4">
-                    {["No", "Yes"].map((opt) => (
-                      <div
-                        key={opt}
-                        onClick={() => setEditForm(prev => ({ ...prev, hasVehicle: opt === "Yes" }))}
-                        className={`
-                            cursor-pointer flex-1 border py-3 rounded-sm text-center text-sm font-bold uppercase tracking-widest transition-all duration-200
-                            ${(editForm.hasVehicle && opt === "Yes") || (!editForm.hasVehicle && opt === "No")
-                            ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
-                            : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                          }
-                          `}
-                      >
-                        {opt}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {editForm.hasVehicle && (
-                  <div className="flex flex-col gap-4 mt-4">
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">License Plate Number (Primary)</label>
-                      <input
-                        type="text"
-                        value={editForm.vehicleNo}
-                        onChange={(e) =>
-                          setEditForm((prev) => ({
-                            ...prev,
-                            vehicleNo: formatOwnerVehiclePlateInput(e.target.value),
-                          }))
-                        }
-                        placeholder="KA-09-AB-1234 or 22-BH-1234-AA"
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                      />
-                      <p className="text-[10px] text-text-secondary uppercase tracking-wider">
-                        {getOwnerVehiclePlateFormatsHint()}
-                      </p>
-                    </div>
-
-                    {/* Vehicle Type Toggle */}
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Vehicle Type</label>
-                      <div className="flex gap-4">
-                        {(["2-Wheeler", "4-Wheeler"] as const).map((type) => (
-                          <div
-                            key={type}
-                            onClick={() => setEditForm(prev => ({ ...prev, vehicleType: type }))}
-                            className={`
-                              cursor-pointer flex-1 border py-3 rounded-sm text-center text-sm font-bold uppercase tracking-widest transition-all duration-200
-                              ${editForm.vehicleType === type
-                                ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
-                                : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                              }
-                            `}
-                          >
-                            {type}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Vehicle Brand/Model */}
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Vehicle Brand / Model</label>
-                      <input
-                        type="text"
-                        value={editForm.vehicleBrandModel}
-                        onChange={(e) => setEditForm(prev => ({ ...prev, vehicleBrandModel: e.target.value }))}
-                        placeholder="e.g., Royal Enfield Himalayan"
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                      />
-                      <p className="text-[10px] text-text-secondary uppercase tracking-wider">
-                        Helps identify your vehicle in parking reports.
-                      </p>
-                    </div>
-
-                    {/* Vehicle Color */}
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Vehicle Color</label>
-                      <input
-                        type="text"
-                        value={editForm.vehicleColor}
-                        onChange={(e) => setEditForm(prev => ({ ...prev, vehicleColor: e.target.value }))}
-                        placeholder="e.g., White, Matte Black, Red"
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                      />
-                      <p className="text-[10px] text-text-secondary uppercase tracking-wider">
-                        Helps pinpoint the right vehicle quickly.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                        Additional Vehicle Numbers
-                      </label>
-                      <button
-                        type="button"
-                        onClick={addAnotherVehicleField}
-                        className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-accent-blue hover:text-white transition-colors"
-                      >
-                        <Plus className="w-4 h-4" />
-                        Add Another
-                      </button>
-                    </div>
-
-                    {editAdditionalVehicles.length === 0 && (
-                      <p className="text-xs text-text-secondary border border-dashed border-white/10 rounded-sm p-3">
-                        No additional vehicles added.
-                      </p>
-                    )}
-
-                    {editAdditionalVehicles.map((vehicle, index) => (
-                      <div key={`vehicle-${index}`} className="border border-white/10 rounded-sm p-4 flex flex-col gap-3 bg-white/[0.02]">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Vehicle {index + 2}</span>
-                          <button
-                            type="button"
-                            onClick={() => removeAdditionalVehicleField(index)}
-                            className="p-1 rounded-sm border border-white/10 text-text-secondary hover:text-white hover:border-white/30 transition-colors"
-                            aria-label={`Remove vehicle ${index + 2}`}
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <input
-                          type="text"
-                          value={vehicle.vehicleNo}
-                          onChange={(e) => updateAdditionalVehicleField(index, "vehicleNo", e.target.value)}
-                          placeholder="KA-09-AB-1234"
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3 text-base font-mono tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                        />
-                        <div className="flex gap-3">
-                          {(["2-Wheeler", "4-Wheeler"] as const).map((type) => (
-                            <div
-                              key={type}
-                              onClick={() => updateAdditionalVehicleField(index, "vehicleType", type)}
-                              className={`cursor-pointer flex-1 border py-2 rounded-sm text-center text-[11px] font-bold uppercase tracking-widest transition-all duration-200 ${
-                                vehicle.vehicleType === type
-                                  ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_10px_rgba(37,99,235,0.2)]"
-                                  : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                              }`}
-                            >
-                              {type}
-                            </div>
-                          ))}
-                        </div>
-                        <input
-                          type="text"
-                          value={vehicle.vehicleBrandModel}
-                          onChange={(e) => updateAdditionalVehicleField(index, "vehicleBrandModel", e.target.value)}
-                          placeholder="Brand / Model (e.g., TVS Jupiter)"
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-2.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                        />
-                        <input
-                          type="text"
-                          value={vehicle.vehicleColor}
-                          onChange={(e) => updateAdditionalVehicleField(index, "vehicleColor", e.target.value)}
-                          placeholder="Color (e.g., Black)"
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-2.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
-                <h4 className="text-[11px] font-black uppercase tracking-[0.2em] text-text-secondary">
-                  Account Security and Access
-                </h4>
-                <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                  Email Verification Status
                 </label>
-                {isVerifiedUser ? (
-                  <p className="text-sm text-green-400 bg-green-500/10 border border-green-500/30 rounded-sm p-3">
-                    {verificationMethodText}
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-sm text-accent-amber bg-accent-amber/10 border border-accent-amber/30 rounded-sm p-3">
-                      Unverified. Please verify your email to complete trusted account status.
-                    </p>
-                    {hasEmailProvider && (
-                      <button
-                        type="button"
-                        onClick={handleSendVerificationEmail}
-                        disabled={isSendingVerificationEmail}
-                        className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
-                      >
-                        {isSendingVerificationEmail ? "Sending..." : "Send Verification Link"}
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {isGoogleOnlyAccount && (
-                <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                    Link Password Login (Google-only users)
-                  </label>
-                  <div className="flex flex-col md:flex-row gap-3">
-                    <div className="relative flex-1">
-                      <input
-                        type={showLinkPassword ? "text" : "password"}
-                        value={linkPassword}
-                        onChange={(e) => setLinkPassword(e.target.value)}
-                        placeholder="Create password (min 6 chars)"
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 pr-12 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowLinkPassword((prev) => !prev)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-white transition-colors"
-                        aria-label={showLinkPassword ? "Hide password" : "Show password"}
-                      >
-                        {showLinkPassword ? (
-                          <EyeOff className="w-5 h-5" />
-                        ) : (
-                          <Eye className="w-5 h-5" />
-                        )}
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleLinkPassword}
-                      disabled={isLinkingPassword}
-                      className="bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
-                    >
-                      {isLinkingPassword ? "Linking..." : "Link Password"}
-                    </button>
-                  </div>
-                  <p className="text-xs text-text-secondary">
-                    This links password login to the same account you already use with Google.
-                  </p>
-                </div>
               )}
 
-              {/* Link Google Account — visible for email-only users */}
-              {hasEmailProvider && !hasGoogleProvider && (
-                <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                    Link Google Account
-                  </label>
-                  <p className="text-sm text-text-secondary">
-                    Connect your NIE Google Workspace account to enable one-click sign-in and automatic verification.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setError("");
-                      setSuccess("");
-                      try {
-                        const supabase = createClient();
-                        const { data, error: linkError } = await supabase.auth.linkIdentity({
-                          provider: "google",
-                          options: {
-                            redirectTo: `${window.location.origin}/auth/callback`,
-                            queryParams: {
-                              prompt: "select_account consent",
-                              hd: "nie.ac.in",
-                            },
-                          },
-                        });
-                        if (linkError) throw linkError;
-                        if (data?.url) {
-                          window.location.href = data.url;
-                        }
-                      } catch (err: any) {
-                        if (err?.message?.includes("404") || err?.status === 404) {
-                          setError("Identity linking is not enabled. Please enable 'Allow Manual Linking' in Supabase Dashboard → Authentication → Providers.");
-                        } else {
-                          setError(err.message || "Unable to link Google account.");
-                        }
-                      }
-                    }}
-                    className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors inline-flex items-center gap-3"
-                  >
-                    <GoogleMark className="w-5 h-5" />
-                    Link Google Account
-                  </button>
-                </div>
-              )}
-
-              {/* Reset Password Section — visible if user has email/password login */}
-              {(hasEmailProvider || authProviderFromProfile === "both") && (
-                <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2 flex flex-col gap-3">
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                    Reset Password
-                  </label>
-                  <p className="text-sm text-text-secondary">
-                    We&apos;ll send a secure password reset link to your institutional email.
-                  </p>
-                  <button
-                    type="button"
-                    disabled={isSendingResetEmail}
-                    onClick={async () => {
-                      setIsSendingResetEmail(true);
-                      setError("");
-                      setSuccess("");
-                      try {
-                        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-                          redirectTo: `${window.location.origin}/reset-password`,
-                        });
-                        if (resetError) throw resetError;
-                        setSuccess("Password reset link sent to your email. Check your inbox.");
-                      } catch (err: any) {
-                        setError(err.message || "Unable to send reset link.");
-                      } finally {
-                        setIsSendingResetEmail(false);
-                      }
-                    }}
-                    className="w-fit bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60 inline-flex items-center gap-2"
-                  >
-                    {isSendingResetEmail ? "Sending..." : "Send Password Reset Link"}
-                  </button>
-                </div>
-              )}
             </div>
-          </div>
-        ) : (
-          <>
-            <div className="mt-6 mb-3">
-              <h2 className="text-xs font-black uppercase tracking-[0.22em] text-text-secondary">
-                Security and Sessions
-              </h2>
-            </div>
-            <div className="glass-card p-6 rounded-sm border border-white/10 relative mt-6">
-              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary flex items-center gap-2 mb-4">
-                <Laptop className="w-4 h-4" /> Active Sessions
-              </h3>
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <p className="text-sm text-white font-semibold flex flex-col gap-1">
-                    <span>Logged in from: {activeSession || "Browser on Unknown OS - Bengaluru, IN"}</span>
-                    {authUser?.last_sign_in_at && (
-                      <span className="text-xs text-text-secondary font-normal">
-                        Last sign-in: {formatDateTime(authUser.last_sign_in_at)}
-                      </span>
-                    )}
-                  </p>
-                  <Link
-                    href="/profile/sessions"
-                    className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2 hover:px-5 transition-all duration-300 rounded-sm text-[11px] font-bold uppercase tracking-widest group"
-                  >
-                    Manage Login Sessions
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                  </Link>
-                </div>
-              </div>
-            </div>
-
-
-            {/* View Mode Identity Specifics */}
-            <div className="mt-7 mb-3">
-              <h2 className="text-xs font-black uppercase tracking-[0.22em] text-text-secondary">
-                Residency, Vehicles and Parking History
-              </h2>
-            </div>
-            <div className="grid gap-6 mt-6 md:grid-cols-2 lg:grid-cols-3">
-              <div className="glass-card p-6 rounded-sm border border-white/10 relative">
-                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary flex items-center gap-2 mb-6">
-                  <MapPin className="w-4 h-4" /> Registered Residency Base
-                </h3>
-
-                <div className="flex flex-col gap-1">
-                  <span className="text-white/30 text-xs font-bold uppercase tracking-widest">Campus Status</span>
-                  <span className="text-lg font-bold">{profile?.role}</span>
-                </div>
-
-                <div className="flex flex-col gap-1 mt-6">
-                  <span className="text-white/30 text-xs font-bold uppercase tracking-widest">Location Details</span>
-                  <p className="text-sm font-medium leading-relaxed max-w-sm mt-1 border-l-2 border-white/10 pl-3 py-1">
-                    {profile?.role === "Hostelite"
-                      ? (profile?.hostel_name ? `${profile?.hostel_name}, Room ${profile?.room_no}` : profile?.address)
-                      : (profile?.campus || profile?.address || "No campus specified")}
-                  </p>
-                </div>
-              </div>
-
-              <div className="glass-card p-6 rounded-sm border border-white/10 relative">
-                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary flex items-center gap-2 mb-6">
-                  <Car className="w-4 h-4" /> Synced Vehicles
-                </h3>
-
-                {(profile?.has_vehicle || additionalVehicles.length > 0) ? (
-                  <div className="flex flex-col justify-center h-full pb-8 gap-4">
-                    {/* Primary Vehicle */}
-                    {profile?.vehicle_no && (
-                      <div className="border border-white/10 rounded-sm overflow-hidden">
-                        <div className="bg-black/50 py-4 px-5 font-mono text-xl tracking-[0.2em] uppercase flex items-center justify-between">
-                          {profile.vehicle_no}
-                          <div className="flex items-center gap-2">
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-green-400 not-italic font-sans">Primary</span>
-                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(34,197,94,1)]" />
-                          </div>
-                        </div>
-                        {(profile?.vehicle_type || profile?.vehicle_brand_model || profile?.vehicle_color) && (
-                          <div className="flex flex-wrap gap-x-4 gap-y-1 px-5 py-3 bg-white/[0.02] border-t border-white/5">
-                            {profile.vehicle_type && (
-                              <span className="text-xs text-white/60"><span className="text-white/30">Type:</span> {profile.vehicle_type}</span>
-                            )}
-                            {profile.vehicle_brand_model && (
-                              <span className="text-xs text-white/60"><span className="text-white/30">Model:</span> {profile.vehicle_brand_model}</span>
-                            )}
-                            {profile.vehicle_color && (
-                              <span className="text-xs text-white/60"><span className="text-white/30">Color:</span> {profile.vehicle_color}</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Additional Vehicles */}
-                    {additionalVehicles.map((vehicle) => (
-                      <div key={vehicle.id} className="border border-white/10 rounded-sm overflow-hidden">
-                        <div className="bg-black/50 py-3 px-5 font-mono text-lg tracking-[0.18em] uppercase">
-                          {vehicle.vehicle_no}
-                        </div>
-                        {(vehicle.vehicle_type || vehicle.vehicle_brand_model || vehicle.vehicle_color) && (
-                          <div className="flex flex-wrap gap-x-4 gap-y-1 px-5 py-2.5 bg-white/[0.02] border-t border-white/5">
-                            {vehicle.vehicle_type && (
-                              <span className="text-xs text-white/60"><span className="text-white/30">Type:</span> {vehicle.vehicle_type}</span>
-                            )}
-                            {vehicle.vehicle_brand_model && (
-                              <span className="text-xs text-white/60"><span className="text-white/30">Model:</span> {vehicle.vehicle_brand_model}</span>
-                            )}
-                            {vehicle.vehicle_color && (
-                              <span className="text-xs text-white/60"><span className="text-white/30">Color:</span> {vehicle.vehicle_color}</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-
-                    <p className="text-xs text-text-secondary mt-2 text-center md:text-left">Actively tracked by NIE Parking Patrol authorization grids.</p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center text-center h-[150px] gap-2 p-6 border border-dashed border-white/10 rounded-sm">
-                    <Car className="w-6 h-6 text-white/20" />
-                    <span className="text-sm text-text-secondary">No registered vehicles matching this identity trace.</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="glass-card p-6 rounded-sm border border-white/10 relative">
-                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary flex items-center gap-2 mb-6">
-                  <ShieldAlert className="w-4 h-4" /> Parking Reports
-                </h3>
-                {isParkingSummaryLoading ? (
-                  <div className="flex items-center justify-center py-14">
-                    <Loader2 className="w-5 h-5 animate-spin text-white/50" />
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-sm border border-white/10 bg-black/35 p-3">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Resolved</p>
-                        <p className="mt-1 text-xl font-black text-white">{parkingReportSummary.resolved}</p>
-                      </div>
-                      <div className="rounded-sm border border-white/10 bg-black/35 p-3">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Total</p>
-                        <p className="mt-1 text-xl font-black text-white">{parkingReportSummary.total}</p>
-                      </div>
-                    </div>
-                    <div className="rounded-sm border border-white/10 bg-black/35 p-3 text-xs text-white/70">
-                      Reporter side: {parkingReportSummary.asReporter}
-                      <br />
-                      Owner side: {parkingReportSummary.asOwner}
-                    </div>
-                    <p className="text-xs text-text-secondary">
-                      Live report actions stay in Parking Patrol. Profile Reports stores only finished history.
-                    </p>
-                    <Link
-                      href="/profile/reports"
-                      className="inline-flex w-full items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2.5 rounded-sm text-[11px] font-bold uppercase tracking-widest transition-colors"
-                    >
-                      Open Resolved Reports
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-7 mb-3">
-              <h2 className="text-xs font-black uppercase tracking-[0.22em] text-text-secondary">
-                Security and Data Controls
-              </h2>
-            </div>
-            <div className="glass-card p-6 rounded-sm border border-white/10 relative mt-6">
-              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary mb-4">
-                Data Controls
-              </h3>
-              <p className="text-sm text-white/80 mb-5">
-                Download a full copy of your data or permanently delete your NIE Sync account.
-              </p>
-              <p className="text-xs text-text-secondary mb-5">
-                Sensitive actions require a recent login within 24 hours.
-              </p>
-              <div className="flex flex-col md:flex-row gap-3">
-                <button
-                  type="button"
-                  onClick={handleDownloadData}
-                  disabled={isDownloadingData}
-                  className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
-                >
-                  {isDownloadingData ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Download className="w-4 h-4" />
-                  )}
-                  {isDownloadingData ? "Preparing..." : "Download My Data"}
-                </button>
-                <button
-                  type="button"
-                  onClick={openDeleteAccountModal}
-                  disabled={isDeletingAccount}
-                  className="inline-flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 text-red-300 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-60"
-                >
-                  {isDeletingAccount ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4" />
-                  )}
-                  {isDeletingAccount ? "Deleting..." : "Delete Account"}
-                </button>
-              </div>
-              {!isRecentLogin && (
-                <div className="mt-4 rounded-sm border border-accent-amber/30 bg-accent-amber/10 p-3 text-xs text-accent-amber flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                  Last login is older than 24 hours. Re-authenticate before deleting your account.
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        <AnimatePresence>
-          {isDeleteModalOpen && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-            >
-              <motion.div
-                initial={{ opacity: 0, y: 20, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 12, scale: 0.98 }}
-                className="w-full max-w-xl glass-card border border-white/10 rounded-sm p-6 md:p-7"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-lg font-black uppercase tracking-wider text-white">
-                      Confirm Account Deletion
-                    </h3>
-                    <p className="text-sm text-text-secondary mt-2">
-                      This permanently removes your NIE Sync account, profile, and linked vehicles.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={closeDeleteAccountModal}
-                    disabled={isDeletingAccount}
-                    className="p-2 rounded-sm border border-white/10 text-text-secondary hover:text-white hover:border-white/30 transition-colors disabled:opacity-50"
-                    aria-label="Close delete dialog"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="mt-5 rounded-sm border border-white/10 bg-black/30 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-text-secondary">Security Check</p>
-                  <p className="text-sm text-white mt-2">
-                    Last login: {lastSignInAt ? formatDateTime(lastSignInAt) : "Unavailable"}
-                  </p>
-                  {isRecentLogin ? (
-                    <p className="text-xs text-green-400 mt-2">
-                      Eligible for deletion: signed in within the last 24 hours.
-                    </p>
-                  ) : (
-                    <div className="mt-2">
-                      <p className="text-xs text-accent-amber">
-                        Re-authentication required. Sign in again before deleting your account.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleReauthenticateForDeletion}
-                        className="mt-3 inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-4 py-2 rounded-sm text-[11px] font-bold uppercase tracking-widest"
-                      >
-                        <LogOut className="w-4 h-4" />
-                        Re-authenticate Now
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-5 space-y-4">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">
-                      Type DELETE to confirm
-                    </label>
-                    <input
-                      type="text"
-                      value={deleteConfirmationText}
-                      onChange={(event) => setDeleteConfirmationText(event.target.value)}
-                      placeholder="DELETE"
-                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3 text-sm focus:outline-none focus:border-red-400/60 transition-colors text-white placeholder:text-white/30"
-                    />
-                  </div>
-
-                  <label className="flex items-start gap-3 text-xs text-text-secondary leading-relaxed">
-                    <input
-                      type="checkbox"
-                      checked={deleteConsentChecked}
-                      onChange={(event) => setDeleteConsentChecked(event.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border border-white/20 bg-black/50 accent-red-500"
-                    />
-                    <span>I understand this action is permanent and cannot be undone.</span>
-                  </label>
-                </div>
-
-                <div className="mt-6 flex flex-col-reverse md:flex-row md:justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={closeDeleteAccountModal}
-                    disabled={isDeletingAccount}
-                    className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/10 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDeleteAccount}
-                    disabled={!canConfirmDelete || isDeletingAccount}
-                    className="inline-flex items-center justify-center gap-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-200 px-5 py-3 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors disabled:opacity-50"
-                  >
-                    {isDeletingAccount ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4" />
-                    )}
-                    {isDeletingAccount ? "Deleting..." : "Delete Permanently"}
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
           )}
-        </AnimatePresence>
+        </section>
       </div>
     </main>
   );
 }
+

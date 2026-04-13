@@ -81,17 +81,23 @@ export function ParkingOwnerBanner() {
     let isMounted = true;
 
     const bootstrap = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const result = await supabase.auth.getSession();
+      const session = result?.data?.session;
       if (!isMounted) return;
 
-      setUserId(user?.id || "");
+      setUserId(session?.user?.id || "");
     };
 
-    bootstrap();
+    void bootstrap();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
+      setUserId(session?.user?.id || "");
+    });
+
     return () => {
       isMounted = false;
+      authListener.subscription.unsubscribe();
     };
   }, [supabase]);
 
@@ -128,7 +134,7 @@ export function ParkingOwnerBanner() {
     loadReports();
     const poll = window.setInterval(() => {
       loadReports();
-    }, 30000);
+    }, 2000);
 
     const channel = supabase
       .channel(`parking-owner-banner-${userId}`)
@@ -196,7 +202,7 @@ export function ParkingOwnerBanner() {
       : "-";
   const stageLabel =
     stage === 1
-      ? "Stage 1 - Chat window open"
+      ? "Stage 1 - Owner response live"
       : stage === 2 && !emailCountdownActive
         ? "Stage 2 - Escalation email dispatching"
         : stage === 2
@@ -234,12 +240,12 @@ export function ParkingOwnerBanner() {
   };
 
   return (
-    <div className="fixed left-0 right-0 top-[84px] z-[95]">
-      <div className={`relative w-full border-b px-4 py-3 backdrop-blur-md ${stageContainerClass}`}>
+    <div className="fixed left-0 right-0 top-[84px] z-[95] px-2 sm:px-3">
+      <div className={`relative w-full rounded-xl border px-3 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.28)] backdrop-blur-md sm:px-4 ${stageContainerClass}`}>
         <span className={`absolute inset-y-0 left-0 w-1 animate-pulse ${leftBorderClass}`} />
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <p className="truncate text-xs font-bold tracking-wider text-white/90">
+            <p className="truncate text-xs font-bold tracking-wider text-white/90 sm:text-sm">
               {activeReport.license_plate} - {activeReport.location_description}
             </p>
             <p className="mt-1 text-[11px] text-white/70">{stageLabel}</p>

@@ -3,8 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-import { Loader2, ArrowLeft, Laptop, Monitor, Smartphone, LogOut } from "lucide-react";
-import Link from "next/link";
+import { Loader2, Laptop, Monitor, Smartphone, LogOut } from "lucide-react";
 import { motion } from "framer-motion";
 
 function formatDateTime(timestamp?: string | null) {
@@ -129,14 +128,15 @@ export default function SessionsPage() {
 
   const fetchUserAndSessions = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const result = await supabase.auth.getSession();
+      const session = result?.data?.session;
+      const user = session?.user || null;
       if (!user) {
-        router.push("/login");
+        window.location.href = "/login";
         return;
       }
       setAuthUser(user);
 
-      const { data: { session } } = await supabase.auth.getSession();
       const resolvedSessionId = extractSessionIdFromJwt(session?.access_token);
       setCurrentSessionId(resolvedSessionId);
 
@@ -216,32 +216,25 @@ export default function SessionsPage() {
   const previousSessions = sessions.filter(s => s.revoked_at).slice(0, 5);
 
   return (
-    <main className="min-h-screen w-full bg-campus-black selection:bg-accent-blue/30 selection:text-white font-sans pt-32 pb-12 md:pt-40 md:pb-24 px-4 sm:px-8">
-      <div className="max-w-3xl mx-auto w-full">
-        {/* Navigation & Header */}
-        <div className="mb-10">
-          <Link
-            href="/profile"
-            className="inline-flex items-center gap-2 text-text-secondary hover:text-white transition-colors text-sm font-bold uppercase tracking-widest group"
-          >
-            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-            Back to Profile
-          </Link>
-        </div>
+    <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+      <div className="mx-auto w-full max-w-5xl">
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <div className="mb-8">
-            <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tighter text-white mb-2">
+          <header className="mb-8 rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-text-secondary">
+              Account Security
+            </p>
+            <h1 className="mt-1 text-3xl font-black tracking-tight md:text-4xl">
               Login Sessions
             </h1>
-            <p className="text-text-secondary max-w-xl">
-              Track and manage active device sessions connected to your NIE Sync account.
+            <p className="mt-2 max-w-2xl text-sm text-text-secondary md:text-base">
+              Track and manage active devices connected to your account.
             </p>
-          </div>
+          </header>
 
           {(error || success) && (
             <div className={`p-4 mb-6 rounded-sm border ${error ? "bg-red-500/10 border-red-500/30 text-red-200" : "bg-green-500/10 border-green-500/30 text-green-200"}`}>
@@ -315,7 +308,7 @@ export default function SessionsPage() {
                             </p>
                             <div className="text-xs text-text-secondary mt-1.5 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
                               <span>{locationLabel}</span>
-                              <span className="hidden sm:inline opacity-50">•</span>
+                              <span className="hidden sm:inline opacity-50">â€¢</span>
                               <span>Last active {formatDateTime(sessionRow.last_seen_at)}</span>
                             </div>
                           </div>
@@ -369,3 +362,4 @@ export default function SessionsPage() {
     </main>
   );
 }
+

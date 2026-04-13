@@ -68,7 +68,15 @@ function ProfileReportsArchivePageContent() {
 
   const reportIdFromQuery = searchParams.get("report") || "";
 
-  const loadReports = useCallback(async () => {
+  const loadReports = useCallback(async (viewerId: string) => {
+    if (!viewerId) {
+      setReports([]);
+      setMessages([]);
+      setSelectedReportId("");
+      setIsLoadingReports(false);
+      return;
+    }
+
     setIsLoadingReports(true);
     setSchemaError("");
     setLoadError("");
@@ -78,9 +86,10 @@ function ProfileReportsArchivePageContent() {
       .select(
         "id, reported_by, license_plate, location_description, matched_owner_id, status, resolved_at, created_at, photo_url"
       )
+      .or(`reported_by.eq.${viewerId},matched_owner_id.eq.${viewerId}`)
       .in("status", ["resolved", "unmatched"])
       .order("created_at", { ascending: false })
-      .limit(150);
+      .limit(80);
 
     if (error) {
       if (error.code === "42P01") {
@@ -137,12 +146,16 @@ function ProfileReportsArchivePageContent() {
     let active = true;
 
     const bootstrap = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const result = await supabase.auth.getSession();
+      const user = result?.data?.session?.user || null;
       if (!active) return;
-      setUserId(user?.id || "");
-      await loadReports();
+      const resolvedUserId = user?.id || "";
+      setUserId(resolvedUserId);
+      if (resolvedUserId) {
+        await loadReports(resolvedUserId);
+      } else {
+        setIsLoadingReports(false);
+      }
     };
 
     void bootstrap();
@@ -168,7 +181,7 @@ function ProfileReportsArchivePageContent() {
         "postgres_changes",
         { event: "*", schema: "public", table: "parking_reports" },
         () => {
-          void loadReports();
+          void loadReports(userId);
         }
       )
       .subscribe();

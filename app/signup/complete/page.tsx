@@ -61,12 +61,11 @@ export default function CompleteProfile() {
   useEffect(() => {
     const hydrateExistingProfile = async () => {
       const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const result = await supabase.auth.getSession();
+      const user = result?.data?.session?.user || null;
 
       if (!user) {
-        router.push("/login");
+        window.location.href = "/login";
         return;
       }
 

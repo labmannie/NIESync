@@ -30,9 +30,16 @@ function runTests() {
       makeReport({ status: "chatting", created_at: new Date(NOW - 61 * 1000).toISOString() }),
       NOW
     ),
+    true
+  );
+  assert.equal(
+    isChatWindowOpen(makeReport({ status: "email_sent", phone_revealed: false }), NOW),
+    true
+  );
+  assert.equal(
+    isChatWindowOpen(makeReport({ status: "email_sent", phone_revealed: true }), NOW),
     false
   );
-  assert.equal(isChatWindowOpen(makeReport({ status: "email_sent" }), NOW), false);
 
   assert.equal(canOwnerAcknowledgeReport(makeReport({ status: "pending" }), "owner-id"), true);
   assert.equal(canOwnerAcknowledgeReport(makeReport({ status: "email_sent" }), "owner-id"), true);

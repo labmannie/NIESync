@@ -24,10 +24,9 @@ function getCreatedAtMs(createdAt: string) {
 
 export function isChatWindowOpen(report: ParkingReportAccessRow | null, nowMs = Date.now()) {
   if (!report) return false;
-  if (!["pending", "chatting"].includes(report.status)) return false;
-  const createdMs = getCreatedAtMs(report.created_at);
-  if (!createdMs) return false;
-  return nowMs - createdMs < 1 * 60 * 1000;
+  if (["resolved", "unmatched", "expired"].includes(report.status)) return false;
+  if (report.status === "email_sent" && report.phone_revealed) return false;
+  return ["pending", "chatting", "acknowledged", "email_sent"].includes(report.status);
 }
 
 export function canOwnerAcknowledgeReport(
@@ -83,5 +82,7 @@ export function canReporterCancelReport(
   if (!report || !userId) return false;
   if (report.reported_by !== userId) return false;
   if (!["pending", "chatting"].includes(report.status)) return false;
-  return isChatWindowOpen(report, nowMs);
+  const createdMs = getCreatedAtMs(report.created_at);
+  if (!createdMs) return false;
+  return nowMs - createdMs < 1 * 60 * 1000;
 }

@@ -1,9 +1,16 @@
 "use server";
+import { revalidatePath } from "next/cache";
 
 import { randomUUID } from "crypto";
 import { createClient as createServerClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { normalizeParkingReportPlateForSubmission } from "@/lib/vehiclePlate";
+import { runParkingEscalation } from "@/lib/parkingEscalation";
+import {
+  CHAT_MODERATION_BLOCK_MESSAGE,
+  hasProfanity,
+  sanitizeChatMessage,
+} from "@/lib/chatModeration";
 
 const INCIDENT_PHOTOS_BUCKET = "incident-photos";
 const LOCATION_DESCRIPTION_MAX_LENGTH = 180;
@@ -20,6 +27,12 @@ type BasicActionResult = {
   error?: string;
 };
 
+function normalizePlateKey(value: string) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
 function mapReportSubmissionError(message: string) {
   const normalized = String(message || "").toLowerCase();
   if (normalized.includes("max 3 reports in 2 hours")) {
@@ -31,13 +44,19 @@ function mapReportSubmissionError(message: string) {
   if (normalized.includes("already have an open parking report")) {
     return "You already have one unresolved active report. Resolve it before creating a new one.";
   }
+  if (normalized.includes("cannot report your own vehicle")) {
+    return "You cannot report your own registered vehicle.";
+  }
   return message || "Unable to submit report right now.";
 }
 
 function mapThreadActionError(message: string) {
   const normalized = String(message || "").toLowerCase();
+  if (normalized.includes("chat window closed after phone reveal")) {
+    return "Chat closes after the reporter reveals and calls the owner.";
+  }
   if (normalized.includes("chat window closed")) {
-    return "Chat window is closed for this report. Please use escalation actions.";
+    return "Chat is closed for this report.";
   }
   if (normalized.includes("chat is disabled for unmatched reports")) {
     return "Chat is not available for unmatched reports.";
@@ -129,6 +148,27 @@ async function uploadIncidentPhoto(userId: string, imageFile: File) {
   return data?.path || path;
 }
 
+function resolveAppBaseUrl(clientBaseUrl?: string) {
+  const fromClient = String(clientBaseUrl || "").trim();
+  if (fromClient) {
+    return fromClient.replace(/\/$/, "");
+  }
+
+  const configured = String(
+    process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || ""
+  ).trim();
+  if (configured) {
+    return configured.replace(/\/$/, "");
+  }
+
+  const vercelUrl = String(process.env.VERCEL_URL || "").trim().replace(/\/$/, "");
+  if (vercelUrl) {
+    return `https://${vercelUrl}`;
+  }
+
+  return "";
+}
+
 export async function getParkingIncidentPhotoUrlAction(
   photoPath: string
 ): Promise<{ ok: boolean; url?: string; error?: string }> {
@@ -187,6 +227,37 @@ export async function submitParkingReportAction(
   if (normalizedPlate.error) {
     return { ok: false, error: normalizedPlate.error };
   }
+  const targetPlateKey = normalizePlateKey(normalizedPlate.plate);
+
+  try {
+    const [{ data: ownProfile }, { data: ownExtraVehicles }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("vehicle_no")
+        .eq("id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("profile_vehicles")
+        .select("vehicle_no")
+        .eq("profile_id", user.id)
+        .limit(20),
+    ]);
+
+    const ownPlates = new Set<string>();
+    const primaryVehicle = normalizePlateKey(String((ownProfile as any)?.vehicle_no || ""));
+    if (primaryVehicle) ownPlates.add(primaryVehicle);
+
+    ((ownExtraVehicles || []) as Array<{ vehicle_no?: string | null }>).forEach((row) => {
+      const normalized = normalizePlateKey(String(row?.vehicle_no || ""));
+      if (normalized) ownPlates.add(normalized);
+    });
+
+    if (targetPlateKey && ownPlates.has(targetPlateKey)) {
+      return { ok: false, error: "You cannot report your own registered vehicle." };
+    }
+  } catch {
+    // If profile vehicle lookup fails transiently, fallback to DB RPC guard.
+  }
 
   let photoPath: string | null = null;
   if (hasPhoto) {
@@ -224,13 +295,23 @@ export async function sendParkingMessageAction(
   reportId: string,
   message: string
 ): Promise<BasicActionResult> {
+  const normalizedMessage = sanitizeChatMessage(message);
+  if (!normalizedMessage) {
+    return { ok: false, error: "Message cannot be empty." };
+  }
+
+  if (hasProfanity(normalizedMessage)) {
+    return { ok: false, error: CHAT_MODERATION_BLOCK_MESSAGE };
+  }
+
   const supabase = await createServerClient();
   const { error } = await supabase.rpc("parking_add_message", {
     _report_id: reportId,
-    _message: message,
+    _message: normalizedMessage,
   });
 
   if (error) return { ok: false, error: mapThreadActionError(error.message || "Unable to send message.") };
+  revalidatePath("/parking-patrol");
   return { ok: true };
 }
 
@@ -241,6 +322,7 @@ export async function ownerImMovingAction(reportId: string): Promise<BasicAction
   });
 
   if (error) return { ok: false, error: mapThreadActionError(error.message || "Unable to acknowledge movement.") };
+  revalidatePath("/parking-patrol");
   return { ok: true };
 }
 
@@ -251,6 +333,7 @@ export async function reporterMarkResolvedAction(reportId: string): Promise<Basi
   });
 
   if (error) return { ok: false, error: mapThreadActionError(error.message || "Unable to resolve report.") };
+  revalidatePath("/parking-patrol");
   return { ok: true };
 }
 
@@ -266,6 +349,7 @@ export async function reporterMarkUnresolvedAction(reportId: string): Promise<Ba
       error: mapThreadActionError(error.message || "Unable to reopen this report."),
     };
   }
+  revalidatePath("/parking-patrol");
   return { ok: true };
 }
 
@@ -281,6 +365,7 @@ export async function reporterCancelReportAction(reportId: string): Promise<Basi
       error: mapThreadActionError(error.message || "Unable to cancel this report."),
     };
   }
+  revalidatePath("/parking-patrol");
   return { ok: true };
 }
 
@@ -302,5 +387,35 @@ export async function revealParkingPhoneAction(
     return { ok: false, error: "Owner phone number is unavailable." };
   }
 
+  revalidatePath("/parking-patrol");
   return { ok: true, phone };
+}
+
+export async function triggerParkingEscalationAction(
+  clientBaseUrl?: string
+): Promise<BasicActionResult> {
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return { ok: false, error: "You must be logged in to run escalation sync." };
+  }
+
+  const appBaseUrl = resolveAppBaseUrl(clientBaseUrl);
+  if (!appBaseUrl) {
+    return { ok: false, error: "APP URL is missing. Set NEXT_PUBLIC_APP_URL in environment." };
+  }
+
+  try {
+    await runParkingEscalation(appBaseUrl);
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Escalation sync failed.",
+    };
+  }
 }

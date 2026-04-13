@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Car, Edit3, Loader2, Plus, Save, Trash2, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 import {
   formatOwnerVehiclePlateInput,
   getOwnerVehiclePlateFormatsHint,
@@ -95,12 +96,14 @@ export default function ProfileVehiclesPage() {
       setError("");
 
       try {
-        const result = await supabase.auth.getSession();
-        const user = result?.data?.session?.user || null;
+        const { user, errorMessage } = await resolveClientUser(supabase);
 
         if (!active) return;
 
         if (!user) {
+          if (errorMessage) {
+            setError(errorMessage);
+          }
           setUserId("");
           return;
         }

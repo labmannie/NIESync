@@ -7,6 +7,7 @@ import { Menu, X, LogOut, ChevronDown, User, ShieldCheck, History, FileWarning, 
 import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 
 type NavbarProfile = {
   id: string;
@@ -63,15 +64,12 @@ export function Navbar() {
     };
 
     const checkAuth = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      const hasSession = Boolean(session);
+      const { user } = await resolveClientUser(supabase);
+      const hasSession = Boolean(user);
       setIsAuthenticated(hasSession);
 
-      if (session?.user?.id) {
-        await loadProfile(session.user.id);
+      if (user?.id) {
+        await loadProfile(user.id);
       } else {
         setProfile(null);
       }

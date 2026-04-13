@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 import { Loader2, Laptop, Monitor, Smartphone, LogOut } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -128,9 +129,11 @@ export default function SessionsPage() {
 
   const fetchUserAndSessions = async () => {
     try {
-      const result = await supabase.auth.getSession();
-      const session = result?.data?.session;
-      const user = session?.user || null;
+      const [{ user }, sessionResult] = await Promise.all([
+        resolveClientUser(supabase),
+        supabase.auth.getSession(),
+      ]);
+      const session = sessionResult?.data?.session || null;
       if (!user) {
         window.location.href = "/login";
         return;

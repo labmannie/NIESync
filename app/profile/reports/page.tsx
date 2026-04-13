@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft, CheckCircle2, Download, Loader2, RotateCcw } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 import {
   getParkingIncidentPhotoUrlAction,
   reporterMarkUnresolvedAction,
@@ -147,8 +148,7 @@ function ProfileReportsArchivePageContent() {
 
     const bootstrap = async () => {
       try {
-        const result = await supabase.auth.getSession();
-        const user = result?.data?.session?.user || null;
+        const { user } = await resolveClientUser(supabase);
         if (!active) return;
         const resolvedUserId = user?.id || "";
         setUserId(resolvedUserId);

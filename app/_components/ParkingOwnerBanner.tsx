@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 
 type OwnerReportBannerRow = {
   id: string;
@@ -81,11 +82,10 @@ export function ParkingOwnerBanner() {
     let isMounted = true;
 
     const bootstrap = async () => {
-      const result = await supabase.auth.getSession();
-      const session = result?.data?.session;
+      const { user } = await resolveClientUser(supabase);
       if (!isMounted) return;
 
-      setUserId(session?.user?.id || "");
+      setUserId(user?.id || "");
     };
 
     void bootstrap();

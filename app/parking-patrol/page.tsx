@@ -21,6 +21,7 @@ import {
   normalizeParkingReportPlateForSubmission,
   validateParkingReportPlate,
 } from "@/lib/vehiclePlate";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 import {
   getParkingIncidentPhotoUrlAction,
   ownerImMovingAction,
@@ -817,9 +818,8 @@ function ParkingPatrolPageContent() {
 
     const bootstrap = async () => {
       try {
-        const result = await supabase.auth.getSession();
-        const session = result?.data?.session;
-        const resolvedUserId = session?.user?.id || "";
+        const { user } = await resolveClientUser(supabase);
+        const resolvedUserId = user?.id || "";
         await applySessionState(resolvedUserId, true);
       } catch (error) {
         console.error("Parking patrol auth bootstrap failed:", error);

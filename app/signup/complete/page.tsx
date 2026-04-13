@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 import {
   normalizePhoneNumber,
   validateRequiredPhoneNumber,
@@ -61,8 +62,7 @@ export default function CompleteProfile() {
   useEffect(() => {
     const hydrateExistingProfile = async () => {
       const supabase = createClient();
-      const result = await supabase.auth.getSession();
-      const user = result?.data?.session?.user || null;
+      const { user } = await resolveClientUser(supabase);
 
       if (!user) {
         window.location.href = "/login";

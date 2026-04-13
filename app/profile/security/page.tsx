@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 import { GoogleMark } from "@/app/_components/GoogleMark";
 
 type ProfileRow = {
@@ -80,12 +81,14 @@ export default function ProfileSecurityPage() {
       setError("");
 
       try {
-        const result = await supabase.auth.getSession();
-        const user = result?.data?.session?.user || null;
+        const { user, errorMessage } = await resolveClientUser(supabase);
 
         if (!active) return;
 
         if (!user) {
+          if (errorMessage) {
+            setError(errorMessage);
+          }
           window.location.href = "/login";
           return;
         }

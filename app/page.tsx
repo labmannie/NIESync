@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+import { resolveClientUser } from "@/utils/supabase/authClient";
 
 function HeroContent() {
   const [isAuth, setIsAuth] = useState(false);
@@ -15,8 +16,8 @@ function HeroContent() {
     const supabase = createClient();
 
     // Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsAuth(!!session);
+    void resolveClientUser(supabase).then(({ user }) => {
+      setIsAuth(!!user);
     });
 
     // Listen for auth changes

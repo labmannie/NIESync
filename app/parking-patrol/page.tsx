@@ -816,11 +816,15 @@ function ParkingPatrolPageContent() {
     };
 
     const bootstrap = async () => {
-      const result = await supabase.auth.getSession();
-      const session = result?.data?.session;
-
-      const resolvedUserId = session?.user?.id || "";
-      await applySessionState(resolvedUserId, true);
+      try {
+        const result = await supabase.auth.getSession();
+        const session = result?.data?.session;
+        const resolvedUserId = session?.user?.id || "";
+        await applySessionState(resolvedUserId, true);
+      } catch (error) {
+        console.error("Parking patrol auth bootstrap failed:", error);
+        await applySessionState("", true);
+      }
     };
 
     void bootstrap();

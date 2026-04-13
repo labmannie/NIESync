@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/utils/supabase/server";
+import { createSupabaseFetch, getServiceRoleConfig } from "@/utils/supabase/config";
 
 const NIE_DOMAIN_SUFFIX = "@nie.ac.in";
 const GROUP_EMAIL_BLOCK_MESSAGE =
@@ -12,16 +13,15 @@ const normalizeProvider = (provider: string) => {
 };
 
 function getAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
+  try {
+    const { url: supabaseUrl, serviceRoleKey } = getServiceRoleConfig("auth callback");
+    return createAdminClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: createSupabaseFetch() },
+    });
+  } catch {
     return null;
   }
-
-  return createAdminClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
 }
 
 async function findBlockedEmailEntry(admin: ReturnType<typeof getAdminClient>, email: string) {

@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { createSupabaseFetch, getPublicSupabaseConfig } from '@/utils/supabase/config';
 
 function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
@@ -12,6 +13,7 @@ function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Pro
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const { url, anonKey } = getPublicSupabaseConfig('middleware');
 
   // ── 0. Skip Prefetches ──
   // Next.js Link prefetches can silently trigger token refreshes in middleware,
@@ -37,9 +39,12 @@ export async function middleware(request: NextRequest) {
   });
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    url,
+    anonKey,
     {
+      global: {
+        fetch: createSupabaseFetch(),
+      },
       cookies: {
         getAll() {
           return request.cookies.getAll();

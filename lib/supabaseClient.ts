@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
+import { createSupabaseFetch, getPublicSupabaseConfig } from '@/utils/supabase/config'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const { url: supabaseUrl, anonKey: supabaseAnonKey } = getPublicSupabaseConfig('legacy client')
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: createSupabaseFetch() },
+})

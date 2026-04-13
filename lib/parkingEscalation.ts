@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { sendParkingEmail } from "@/lib/mailer";
+import { createSupabaseFetch, getServiceRoleConfig } from "@/utils/supabase/config";
 
 type OwnerProfile = {
   full_name?: string | null;
@@ -34,17 +35,15 @@ export type ParkingEscalationSummary = {
 const INCIDENT_PHOTOS_BUCKET = "incident-photos";
 
 function getSupabaseAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.");
-  }
+  const { url: supabaseUrl, serviceRoleKey } = getServiceRoleConfig("parking escalation");
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    global: {
+      fetch: createSupabaseFetch(),
     },
   });
 }

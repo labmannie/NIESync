@@ -146,15 +146,23 @@ function ProfileReportsArchivePageContent() {
     let active = true;
 
     const bootstrap = async () => {
-      const result = await supabase.auth.getSession();
-      const user = result?.data?.session?.user || null;
-      if (!active) return;
-      const resolvedUserId = user?.id || "";
-      setUserId(resolvedUserId);
-      if (resolvedUserId) {
-        await loadReports(resolvedUserId);
-      } else {
+      try {
+        const result = await supabase.auth.getSession();
+        const user = result?.data?.session?.user || null;
+        if (!active) return;
+        const resolvedUserId = user?.id || "";
+        setUserId(resolvedUserId);
+        if (resolvedUserId) {
+          await loadReports(resolvedUserId);
+        } else {
+          setIsLoadingReports(false);
+        }
+      } catch (error) {
+        if (!active) return;
+        console.error("Profile reports auth bootstrap failed:", error);
+        setUserId("");
         setIsLoadingReports(false);
+        setLoadError("Unable to verify your session. Please refresh and try again.");
       }
     };
 

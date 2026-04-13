@@ -33,6 +33,7 @@ type ProfileRow = {
   hostel_name: string | null;
   room_no: string | null;
   avatar_url: string | null;
+  email_verified: boolean | null;
 };
 
 type ProfileDraft = {

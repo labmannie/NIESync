@@ -15,6 +15,27 @@ export async function resolveClientUser(supabase: SupabaseClient): Promise<{
   errorMessage: string;
 }> {
   const timeoutMs = Math.min(4000, getSupabaseRequestTimeoutMs());
+  const quickTimeoutMs = Math.min(1200, timeoutMs);
+
+  try {
+    const { data, error } = await withTimeout(
+      supabase.auth.getSession(),
+      quickTimeoutMs,
+      "auth.getSession"
+    );
+    if (data?.session?.user) {
+      return { user: data.session.user, errorMessage: "" };
+    }
+    if (error && !/auth session missing/i.test(String(error.message || ""))) {
+      return { user: null, errorMessage: String(error.message || "Unable to fetch session.") };
+    }
+  } catch (error: any) {
+    const message = String(error?.message || "");
+    const isExpected = /auth session missing|timed out/i.test(message);
+    if (!isExpected) {
+      console.warn("[Supabase] resolveClientUser(getSession) failed:", message || error);
+    }
+  }
 
   try {
     const { data, error } = await withTimeout(
@@ -25,32 +46,16 @@ export async function resolveClientUser(supabase: SupabaseClient): Promise<{
     if (data?.user) {
       return { user: data.user, errorMessage: "" };
     }
-    if (error && !/auth session missing/i.test(String(error.message || ""))) {
-      return { user: null, errorMessage: String(error.message || "Unable to fetch user.") };
-    }
-  } catch (error: any) {
-    const message = String(error?.message || "");
-    if (!/auth session missing/i.test(message)) {
-      console.error("[Supabase] resolveClientUser(getUser) failed:", message || error);
-    }
-  }
-
-  try {
-    const { data, error } = await withTimeout(
-      supabase.auth.getSession(),
-      timeoutMs,
-      "auth.getSession"
-    );
-    if (data?.session?.user) {
-      return { user: data.session.user, errorMessage: "" };
-    }
     return {
       user: null,
       errorMessage: String(error?.message || ""),
     };
   } catch (error: any) {
-    const message = String(error?.message || "Unable to resolve session.");
-    console.error("[Supabase] resolveClientUser(getSession) failed:", message);
+    const message = String(error?.message || "Unable to resolve user.");
+    const isExpected = /auth session missing|timed out/i.test(message);
+    if (!isExpected) {
+      console.warn("[Supabase] resolveClientUser(getUser) failed:", message);
+    }
     return { user: null, errorMessage: message };
   }
 }

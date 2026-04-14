@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
   CheckCircle2,
+  Clock,
   Download,
   Eye,
   EyeOff,
@@ -14,11 +15,13 @@ import {
   Lock,
   LogOut,
   Mail,
+  Shield,
   Trash2,
   X,
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { MobileToast } from "@/components/MobileToast";
 import { GoogleMark } from "@/app/_components/GoogleMark";
 
 type ProfileRow = {
@@ -60,6 +63,7 @@ export default function ProfileSecurityPage() {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [mobileToast, setMobileToast] = useState<{ kind: "error" | "success"; message: string } | null>(null);
 
   const [isSendingVerificationEmail, setIsSendingVerificationEmail] = useState(false);
   const [isSendingResetEmail, setIsSendingResetEmail] = useState(false);
@@ -67,7 +71,8 @@ export default function ProfileSecurityPage() {
   const [showLinkPassword, setShowLinkPassword] = useState(false);
   const [isLinkingPassword, setIsLinkingPassword] = useState(false);
   const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
-  const [isDownloadingData, setIsDownloadingData] = useState(false);
+  const [isDataExportModalOpen, setIsDataExportModalOpen] = useState(false);
+  const [dataExportStep, setDataExportStep] = useState<"info" | "confirmed">("info");
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
@@ -119,6 +124,16 @@ export default function ProfileSecurityPage() {
     };
   }, [router, supabase]);
 
+  useEffect(() => {
+    if (!error) return;
+    setMobileToast({ kind: "error", message: error });
+  }, [error]);
+
+  useEffect(() => {
+    if (!success) return;
+    setMobileToast({ kind: "success", message: success });
+  }, [success]);
+
   const authProviders = new Set<string>();
   const metadataProviders = Array.isArray(authUser?.app_metadata?.providers)
     ? authUser.app_metadata.providers
@@ -153,6 +168,7 @@ export default function ProfileSecurityPage() {
     isRecentLogin;
 
   const handleSendVerificationEmail = async () => {
+    setError("");
     if (!email) {
       setError("Unable to find your email for verification.");
       return;
@@ -181,6 +197,7 @@ export default function ProfileSecurityPage() {
   };
 
   const handleLinkPassword = async () => {
+    setError("");
     if (linkPassword.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
@@ -248,6 +265,7 @@ export default function ProfileSecurityPage() {
   };
 
   const handleResetPassword = async () => {
+    setError("");
     if (!email) {
       setError("Unable to find your email.");
       return;
@@ -269,69 +287,21 @@ export default function ProfileSecurityPage() {
     }
   };
 
-  const handleDownloadData = async () => {
-    setIsDownloadingData(true);
-    setError("");
-    setSuccess("");
+  const handleOpenDataExportModal = () => {
+    setDataExportStep("info");
+    setIsDataExportModalOpen(true);
+  };
 
-    try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError || !user) throw new Error("You need to be logged in to export your data.");
+  const handleConfirmDataExport = () => {
+    setDataExportStep("confirmed");
 
-      const [
-        { data: profileData, error: profileError },
-        { data: vehiclesData, error: vehiclesError },
-        { data: sessionsData, error: sessionsError },
-      ] = await Promise.all([
-        supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
-        supabase.from("profile_vehicles").select("*").eq("profile_id", user.id).order("created_at", { ascending: true }),
-        supabase
-          .from("auth_session_devices")
-          .select("id, session_id, user_agent, ip_address, location_label, created_at, last_seen_at, revoked_at")
-          .eq("user_id", user.id)
-          .order("last_seen_at", { ascending: false }),
-      ]);
-
-      if (profileError) throw profileError;
-      if (vehiclesError && vehiclesError.code !== "42P01") throw vehiclesError;
-      if (sessionsError && sessionsError.code !== "42P01") throw sessionsError;
-
-      const payload = {
-        exported_at: new Date().toISOString(),
-        source: "NIE Sync",
-        auth: {
-          id: user.id,
-          email: user.email,
-          created_at: user.created_at,
-          last_sign_in_at: user.last_sign_in_at,
-          app_metadata: user.app_metadata,
-          user_metadata: user.user_metadata,
-        },
-        profile: profileData,
-        vehicles: vehiclesData || [],
-        sessions: sessionsData || [],
-      };
-
-      const fileContent = JSON.stringify(payload, null, 2);
-      const blob = new Blob([fileContent], { type: "application/json" });
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `niesync-data-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
-
-      setSuccess("Your account data export is ready.");
-    } catch (err: any) {
-      setError(err.message || "Unable to download your data right now.");
-    } finally {
-      setIsDownloadingData(false);
-    }
+    // Fire-and-forget: send the request in the background, user doesn't wait
+    void fetch("/api/export-my-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).catch(() => {
+      // Silent — user already sees the confirmation message
+    });
   };
 
   const handleReauthenticateForDeletion = async () => {
@@ -341,6 +311,7 @@ export default function ProfileSecurityPage() {
   };
 
   const handleDeleteAccount = async () => {
+    setError("");
     if (!isRecentLogin) {
       setError("For account safety, sign in again. Last login must be within 24 hours.");
       return;
@@ -387,7 +358,7 @@ export default function ProfileSecurityPage() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+      <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
         <div className="mx-auto w-full max-w-5xl space-y-5 animate-pulse">
           <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
           <div className="grid gap-5 lg:grid-cols-2">
@@ -401,13 +372,19 @@ export default function ProfileSecurityPage() {
   }
 
   return (
-    <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
+      <MobileToast
+        kind={mobileToast?.kind || "info"}
+        message={mobileToast?.message || ""}
+        open={Boolean(mobileToast?.message)}
+        onClose={() => setMobileToast(null)}
+      />
       <div className="mx-auto w-full max-w-5xl">
         <motion.header
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
-          className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7"
+          className="rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(37,99,235,0.14)_0%,rgba(255,176,0,0.1)_55%,rgba(255,255,255,0.04)_100%)] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.5)] md:p-7"
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
@@ -423,7 +400,7 @@ export default function ProfileSecurityPage() {
             </div>
             <Link
               href="/profile/sessions"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] transition-colors hover:bg-white/20"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/45 bg-accent-blue/20 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-white transition-colors hover:bg-accent-blue/30"
             >
               View Auth History
             </Link>
@@ -436,7 +413,7 @@ export default function ProfileSecurityPage() {
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+              className="mt-4 hidden rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200 md:block"
             >
               {error}
             </motion.div>
@@ -446,7 +423,7 @@ export default function ProfileSecurityPage() {
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="mt-4 rounded-xl border border-green-500/35 bg-green-500/10 px-4 py-3 text-sm text-green-200"
+              className="mt-4 hidden rounded-xl border border-green-500/35 bg-green-500/10 px-4 py-3 text-sm text-green-200 md:block"
             >
               {success}
             </motion.div>
@@ -454,7 +431,7 @@ export default function ProfileSecurityPage() {
         </AnimatePresence>
 
         <section className="mt-5 grid gap-5 lg:grid-cols-2">
-          <article className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-6">
+          <article className="rounded-[24px] border border-white/10 bg-black/35 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm md:p-6">
             <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
               Verification and Providers
             </h2>
@@ -502,7 +479,7 @@ export default function ProfileSecurityPage() {
             ) : null}
           </article>
 
-          <article className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-6">
+          <article className="rounded-[24px] border border-white/10 bg-black/35 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm md:p-6">
             <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
               Login Methods
             </h2>
@@ -573,7 +550,7 @@ export default function ProfileSecurityPage() {
           </article>
         </section>
 
-        <section className="mt-5 rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-6">
+        <section className="mt-5 rounded-[24px] border border-white/10 bg-black/35 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm md:p-6">
           <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
             Data and Account Controls
           </h2>
@@ -582,14 +559,13 @@ export default function ProfileSecurityPage() {
           </p>
           <div className="mt-4 flex flex-col gap-3 sm:flex-row">
             <button
-              type="button"
-              onClick={handleDownloadData}
-              disabled={isDownloadingData}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-xs font-black uppercase tracking-[0.12em] transition-colors hover:bg-white/20 disabled:opacity-60"
-            >
-              {isDownloadingData ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {isDownloadingData ? "Preparing..." : "Download My Data"}
-            </button>
+               type="button"
+               onClick={handleOpenDataExportModal}
+               className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-xs font-black uppercase tracking-[0.12em] transition-colors hover:bg-white/20"
+             >
+               <Download className="h-4 w-4" />
+               Download My Data
+             </button>
             <button
               type="button"
               onClick={() => {
@@ -702,6 +678,129 @@ export default function ProfileSecurityPage() {
                   {isDeletingAccount ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                   {isDeletingAccount ? "Deleting..." : "Delete Permanently"}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      {/* ── Data Export Modal ── */}
+      <AnimatePresence>
+        {isDataExportModalOpen ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/80 px-3 py-8 backdrop-blur-sm sm:items-center sm:px-4 sm:py-0"
+            onClick={(e) => { if (e.target === e.currentTarget) setIsDataExportModalOpen(false); }}
+          >
+            <motion.div
+              initial={{ y: 18, opacity: 0, scale: 0.97 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 18, opacity: 0, scale: 0.97 }}
+              transition={{ duration: 0.25 }}
+              className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(135deg,#0a0a0a_0%,#111111_100%)] shadow-[0_24px_80px_rgba(0,0,0,0.7)] sm:rounded-[22px]"
+            >
+              {/* Header strip */}
+              <div className="relative overflow-hidden bg-gradient-to-r from-[#0a0f24] to-[#0d1430] px-4 py-4 sm:px-6 sm:py-5">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.2),transparent_60%)]" />
+                <div className="relative flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-blue/20 border border-accent-blue/30 sm:h-10 sm:w-10">
+                      <Shield className="h-4 w-4 text-accent-blue sm:h-5 sm:w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-black uppercase tracking-[0.18em] text-[#FFB000] sm:text-[10px]">NIE Sync</p>
+                      <p className="truncate text-sm font-black text-white sm:text-base">Personal Data Export</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsDataExportModalOpen(false)}
+                    className="shrink-0 rounded-lg border border-white/15 p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="px-4 py-4 sm:px-6 sm:py-5">
+                {/* Step: Info */}
+                {dataExportStep === "info" ? (
+                  <div className="space-y-3 sm:space-y-4">
+                    <div className="flex items-start gap-2.5 rounded-xl border border-amber-400/30 bg-amber-500/8 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+                      <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-400 sm:h-5 sm:w-5" />
+                      <div>
+                        <p className="text-xs font-bold text-amber-100 sm:text-sm">This may take a few minutes</p>
+                        <p className="mt-1 text-[11px] leading-relaxed text-amber-200/80 sm:text-xs">
+                          We'll gather your complete profile, all parking reports with chat transcripts, and your full authentication history. This data will be compiled into <strong>3 professionally formatted PDF documents</strong> and sent directly to your registered email.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <div className="flex items-center gap-2.5 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5">
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent-blue/15 text-[10px] font-black text-accent-blue sm:h-7 sm:w-7 sm:text-[11px]">1</div>
+                        <p className="text-[11px] text-white/80 sm:text-xs"><span className="font-bold text-white">Profile & Activity Summary</span> — Your profile, parking reports table</p>
+                      </div>
+                      <div className="flex items-center gap-2.5 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5">
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent-blue/15 text-[10px] font-black text-accent-blue sm:h-7 sm:w-7 sm:text-[11px]">2</div>
+                        <p className="text-[11px] text-white/80 sm:text-xs"><span className="font-bold text-white">Chat Transcripts</span> — Every report conversation</p>
+                      </div>
+                      <div className="flex items-center gap-2.5 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5">
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent-blue/15 text-[10px] font-black text-accent-blue sm:h-7 sm:w-7 sm:text-[11px]">3</div>
+                        <p className="text-[11px] text-white/80 sm:text-xs"><span className="font-bold text-white">Auth History</span> — Complete login & session records</p>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] leading-relaxed text-white/50 sm:text-[11px]">
+                      By proceeding, your data will be emailed to <strong className="text-white/70">{email}</strong>. Please check your inbox in a few minutes.
+                    </p>
+
+                    <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setIsDataExportModalOpen(false)}
+                        className="inline-flex h-10 items-center justify-center rounded-xl border border-white/15 bg-white/[0.05] px-5 text-[11px] font-bold uppercase tracking-[0.12em] text-white/80 transition-colors hover:bg-white/10 sm:h-auto sm:py-2.5 sm:text-xs"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmDataExport}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-accent-blue/50 bg-accent-blue/20 px-5 text-[11px] font-black uppercase tracking-[0.12em] text-white transition-colors hover:bg-accent-blue/30 sm:h-auto sm:py-2.5 sm:text-xs"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        I Understand, Proceed
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Step: Confirmed — user can close immediately */}
+                {dataExportStep === "confirmed" ? (
+                  <div className="flex flex-col items-center px-2 py-5 sm:py-6">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/15 sm:h-16 sm:w-16">
+                      <Mail className="h-7 w-7 text-emerald-400 sm:h-8 sm:w-8" />
+                    </div>
+                    <h3 className="mt-4 text-center text-sm font-black text-white sm:text-base">Request Submitted!</h3>
+                    <p className="mt-2 max-w-xs text-center text-[11px] leading-relaxed text-white/60 sm:text-xs">
+                      Your data is being prepared and will be sent to <strong className="text-white/80">{email}</strong> within the next few minutes. Please check your inbox (and spam folder).
+                    </p>
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 text-[9px] text-white/40 sm:mt-5 sm:gap-2 sm:text-[10px]">
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 sm:px-2.5 sm:py-1">📋 Profile Summary</span>
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 sm:px-2.5 sm:py-1">💬 Chat Transcripts</span>
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 sm:px-2.5 sm:py-1">🔐 Auth History</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsDataExportModalOpen(false)}
+                      className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-6 text-[11px] font-black uppercase tracking-[0.12em] transition-colors hover:bg-white/20 sm:mt-6 sm:h-auto sm:py-2.5 sm:text-xs"
+                    >
+                      Got it, Close
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </motion.div>
           </motion.div>

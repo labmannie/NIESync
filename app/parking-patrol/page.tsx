@@ -22,7 +22,13 @@ import {
   validateParkingReportPlate,
 } from "@/lib/vehiclePlate";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { MobileToast } from "@/components/MobileToast";
 import {
+  downloadParkingIncidentReportPdf,
+  downloadParkingTranscriptPdf,
+} from "@/lib/parkingReportPdf";
+import {
+  detectParkingPlateFromPhotoAction,
   getParkingIncidentPhotoUrlAction,
   ownerImMovingAction,
   reporterCancelReportAction,
@@ -81,23 +87,8 @@ type UnmatchedReportSnapshot = {
   plate: string;
   location: string;
   reportedAtIso: string;
+  incidentPhotoUrl: string;
 };
-
-type TesseractRecognizer = {
-  recognize: (
-    image: Blob,
-    language?: string,
-    options?: {
-      logger?: (message: { status?: string; progress?: number }) => void;
-    }
-  ) => Promise<{ data: { text: string } }>;
-};
-
-declare global {
-  interface Window {
-    Tesseract?: TesseractRecognizer;
-  }
-}
 
 const COMMON_LOCATION_ZONES = [
   "Library Gate",
@@ -122,44 +113,6 @@ const STATUS_THEME: Record<ParkingStatus, string> = {
   unmatched: "bg-red-500/10 text-red-400 border border-red-500/20",
   expired: "bg-red-500/10 text-red-400 border border-red-500/20",
 };
-
-let tesseractScriptPromise: Promise<TesseractRecognizer> | null = null;
-
-function loadTesseractRecognizer() {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("OCR is only available in browser context."));
-  }
-  if (window.Tesseract) return Promise.resolve(window.Tesseract);
-  if (tesseractScriptPromise) return tesseractScriptPromise;
-
-  tesseractScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector(
-      'script[data-tesseract-loader="true"]'
-    ) as HTMLScriptElement | null;
-
-    if (existing) {
-      existing.addEventListener("load", () => {
-        if (window.Tesseract) resolve(window.Tesseract);
-        else reject(new Error("Tesseract loaded but not initialized."));
-      });
-      existing.addEventListener("error", () => reject(new Error("Unable to load OCR engine.")));
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-    script.async = true;
-    script.dataset.tesseractLoader = "true";
-    script.onload = () => {
-      if (window.Tesseract) resolve(window.Tesseract);
-      else reject(new Error("OCR engine did not initialize."));
-    };
-    script.onerror = () => reject(new Error("Failed to load OCR script."));
-    document.head.appendChild(script);
-  });
-
-  return tesseractScriptPromise;
-}
 
 async function compressImage(file: File): Promise<Blob> {
   return new Promise((resolve) => {
@@ -307,281 +260,6 @@ function buildUnmatchedCopyText(report: UnmatchedReportSnapshot) {
   ].join("\n");
 }
 
-function escapePrintableHtml(value: string) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function buildUnmatchedReportHtml(report: UnmatchedReportSnapshot, appBaseUrl: string) {
-  const shortId = (String(report.reportId || "").slice(0, 8).toUpperCase() || "UNKNOWN");
-  const reportedAtText = new Date(report.reportedAtIso).toLocaleString();
-  const generatedAtText = new Date().toLocaleString();
-  const safePlate = escapePrintableHtml(report.plate);
-  const safeLocation = escapePrintableHtml(report.location);
-  const safeReportId = escapePrintableHtml(shortId);
-  const safeReportedAtText = escapePrintableHtml(reportedAtText);
-  const safeGeneratedAtText = escapePrintableHtml(generatedAtText);
-  const logoUrl = `${appBaseUrl}/logo.png`;
-  const faqUrl = `${appBaseUrl}/faq`;
-  const termsUrl = `${appBaseUrl}/terms-of-service`;
-  const privacyUrl = `${appBaseUrl}/privacy-policy`;
-
-  return `
-    <!doctype html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>NIE Sync Parking Incident Report</title>
-        <style>
-          :root {
-            --bg: #f6f8fc;
-            --card: #ffffff;
-            --ink: #111827;
-            --muted: #6b7280;
-            --line: #e5e7eb;
-            --amber: #f5a623;
-            --emerald: #22c55e;
-            --sky: #0ea5e9;
-          }
-          * { box-sizing: border-box; }
-          body {
-            margin: 0;
-            font-family: "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            color: var(--ink);
-            background: radial-gradient(circle at top right, #fff4da 0%, var(--bg) 42%);
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          .page {
-            max-width: 920px;
-            margin: 0 auto;
-            padding: 28px 18px;
-          }
-          .card {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 20px;
-            box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
-            overflow: hidden;
-          }
-          .hero {
-            background: linear-gradient(120deg, #0f172a 0%, #111827 42%, #1f2937 100%);
-            color: #fff;
-            padding: 22px 24px;
-          }
-          .brand {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-          }
-          .brand-logo {
-            width: 52px;
-            height: 52px;
-            border-radius: 12px;
-            background: #fff;
-            border: 1px solid rgba(255,255,255,0.25);
-            object-fit: contain;
-            padding: 6px;
-          }
-          .kicker {
-            margin: 0;
-            color: #f8cc75;
-            font-size: 11px;
-            letter-spacing: .16em;
-            text-transform: uppercase;
-            font-weight: 800;
-          }
-          .title {
-            margin: 4px 0 0;
-            font-size: 24px;
-            font-weight: 900;
-            line-height: 1.2;
-          }
-          .subtitle {
-            margin: 10px 0 0;
-            color: #cbd5e1;
-            font-size: 13px;
-            line-height: 1.6;
-          }
-          .section {
-            padding: 22px 24px 2px;
-          }
-          .section-title {
-            margin: 0 0 14px;
-            font-size: 11px;
-            letter-spacing: .16em;
-            text-transform: uppercase;
-            color: var(--muted);
-            font-weight: 800;
-          }
-          .grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-          }
-          .item {
-            border: 1px solid var(--line);
-            border-radius: 14px;
-            padding: 12px 13px;
-            background: #fafafa;
-          }
-          .item-label {
-            margin: 0;
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: .12em;
-            color: var(--muted);
-            font-weight: 700;
-          }
-          .item-value {
-            margin: 6px 0 0;
-            font-size: 16px;
-            line-height: 1.35;
-            font-weight: 800;
-            color: var(--ink);
-            word-break: break-word;
-          }
-          .plate {
-            font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
-            color: #b7791f;
-            letter-spacing: .06em;
-          }
-          .banner {
-            margin: 18px 24px 2px;
-            border: 1px dashed rgba(245, 166, 35, 0.5);
-            background: linear-gradient(135deg, rgba(245,166,35,0.11), rgba(14,165,233,0.08));
-            border-radius: 14px;
-            padding: 14px 14px;
-            font-size: 13px;
-            line-height: 1.6;
-            color: #374151;
-          }
-          .actions {
-            margin: 16px 24px 0;
-            border: 1px solid var(--line);
-            border-radius: 14px;
-            padding: 14px 16px;
-            background: #fff;
-          }
-          .actions h3 {
-            margin: 0 0 10px;
-            font-size: 12px;
-            letter-spacing: .14em;
-            text-transform: uppercase;
-            color: var(--muted);
-          }
-          .actions ul {
-            margin: 0;
-            padding-left: 20px;
-            color: #374151;
-            font-size: 13px;
-            line-height: 1.8;
-          }
-          .footer {
-            padding: 18px 24px 24px;
-          }
-          .meta {
-            margin: 0;
-            color: var(--muted);
-            font-size: 12px;
-            line-height: 1.7;
-          }
-          .links {
-            margin-top: 10px;
-            font-size: 12px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            align-items: center;
-          }
-          .links a {
-            color: #0284c7;
-            text-decoration: none;
-            font-weight: 700;
-          }
-          .dot {
-            color: #94a3b8;
-          }
-          @media (max-width: 640px) {
-            .hero, .section, .footer { padding-left: 16px; padding-right: 16px; }
-            .banner, .actions { margin-left: 16px; margin-right: 16px; }
-            .grid { grid-template-columns: 1fr; }
-            .title { font-size: 20px; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="page">
-          <article class="card">
-            <header class="hero">
-              <div class="brand">
-                <img src="${escapePrintableHtml(logoUrl)}" alt="NIE Sync Logo" class="brand-logo" />
-                <div>
-                  <p class="kicker">NIE Sync</p>
-                  <h1 class="title">Unregistered Vehicle Incident Report</h1>
-                  <p class="subtitle">Generated for manual campus follow-up and parking governance records.</p>
-                </div>
-              </div>
-            </header>
-
-            <section class="section">
-              <p class="section-title">Incident Summary</p>
-              <div class="grid">
-                <div class="item">
-                  <p class="item-label">Vehicle Plate</p>
-                  <p class="item-value plate">${safePlate}</p>
-                </div>
-                <div class="item">
-                  <p class="item-label">Report ID</p>
-                  <p class="item-value">#${safeReportId}</p>
-                </div>
-                <div class="item">
-                  <p class="item-label">Reported At</p>
-                  <p class="item-value">${safeReportedAtText}</p>
-                </div>
-                <div class="item">
-                  <p class="item-label">Location</p>
-                  <p class="item-value">${safeLocation}</p>
-                </div>
-              </div>
-            </section>
-
-            <div class="banner">
-              This vehicle is not registered in NIE Sync. Please proceed with campus-security workflow or a physical notice and keep this report for traceability.
-            </div>
-
-            <section class="actions">
-              <h3>Recommended Follow-up</h3>
-              <ul>
-                <li>Verify the vehicle physically at the reported location.</li>
-                <li>Place a notice requesting immediate vehicle movement.</li>
-                <li>Escalate to campus security if obstruction persists.</li>
-              </ul>
-            </section>
-
-            <footer class="footer">
-              <p class="meta">Generated: ${safeGeneratedAtText}</p>
-              <p class="meta">System: NIE Sync Parking Patrol</p>
-              <div class="links">
-                <a href="${escapePrintableHtml(faqUrl)}">FAQ</a>
-                <span class="dot">•</span>
-                <a href="${escapePrintableHtml(termsUrl)}">Terms of Service</a>
-                <span class="dot">•</span>
-                <a href="${escapePrintableHtml(privacyUrl)}">Privacy Policy</a>
-              </div>
-            </footer>
-          </article>
-        </div>
-      </body>
-    </html>
-  `.trim();
-}
-
 function formatThreadParticipantTag(participant: ProfileIdentityRow) {
   const username = String(participant.username || "").trim();
   if (username) return `@${username}`;
@@ -641,12 +319,17 @@ function ParkingPatrolPageContent() {
   const [submitMessage, setSubmitMessage] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [copyDetailsMessage, setCopyDetailsMessage] = useState("");
+  const [mobileToast, setMobileToast] = useState<{
+    kind: "error" | "success" | "info";
+    message: string;
+  } | null>(null);
   const [unmatchedReport, setUnmatchedReport] = useState<UnmatchedReportSnapshot | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [threadDraft, setThreadDraft] = useState("");
   const [threadActionError, setThreadActionError] = useState("");
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [isDownloadingTranscript, setIsDownloadingTranscript] = useState(false);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -706,7 +389,24 @@ function ParkingPatrolPageContent() {
 
     setSchemaError("");
     const rows = (data || []) as ParkingReportRow[];
-    setReports(rows);
+    setReports((prev) => {
+      if (
+        prev.length === rows.length &&
+        prev.every((row, index) => {
+          const next = rows[index];
+          return (
+            row.id === next.id &&
+            row.status === next.status &&
+            row.acknowledged_at === next.acknowledged_at &&
+            row.resolved_at === next.resolved_at &&
+            row.phone_revealed === next.phone_revealed
+          );
+        })
+      ) {
+        return prev;
+      }
+      return rows;
+    });
     setSelectedReportId((current) => {
       if (current && rows.some((report) => report.id === current)) return current;
       if (reportIdFromQuery && rows.some((report) => report.id === reportIdFromQuery)) {
@@ -747,7 +447,23 @@ function ParkingPatrolPageContent() {
         return;
       }
 
-      setMessages((data || []) as ParkingMessageRow[]);
+      const rows = (data || []) as ParkingMessageRow[];
+      setMessages((prev) => {
+        if (
+          prev.length === rows.length &&
+          prev.every((message, index) => {
+            const next = rows[index];
+            return (
+              message.id === next.id &&
+              message.message === next.message &&
+              message.created_at === next.created_at
+            );
+          })
+        ) {
+          return prev;
+        }
+        return rows;
+      });
     },
     [supabase]
   );
@@ -786,6 +502,17 @@ function ParkingPatrolPageContent() {
     const timer = window.setInterval(() => setClockMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const message = threadActionError || schemaError || submitError;
+    if (!message) return;
+    setMobileToast({ kind: "error", message });
+  }, [threadActionError, schemaError, submitError]);
+
+  useEffect(() => {
+    if (!copyDetailsMessage) return;
+    setMobileToast({ kind: "info", message: copyDetailsMessage });
+  }, [copyDetailsMessage]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -829,8 +556,9 @@ function ParkingPatrolPageContent() {
 
     void bootstrap();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const resolvedUserId = session?.user?.id || "";
+    const { data: authListener } = supabase.auth.onAuthStateChange(async () => {
+      const { user } = await resolveClientUser(supabase);
+      const resolvedUserId = user?.id || "";
       await applySessionState(resolvedUserId, false);
     });
 
@@ -846,22 +574,6 @@ function ParkingPatrolPageContent() {
       return;
     }
     void loadMessages(selectedReportId);
-  }, [selectedReportId, loadMessages]);
-
-  useEffect(() => {
-    if (!isLoggedIn || !userId) return;
-    const poll = window.setInterval(() => {
-      void loadReports(userId, false);
-    }, 2000);
-    return () => window.clearInterval(poll);
-  }, [isLoggedIn, userId, loadReports]);
-
-  useEffect(() => {
-    if (!selectedReportId) return;
-    const poll = window.setInterval(() => {
-      void loadMessages(selectedReportId);
-    }, 2000);
-    return () => window.clearInterval(poll);
   }, [selectedReportId, loadMessages]);
 
   useEffect(() => {
@@ -1052,27 +764,32 @@ function ParkingPatrolPageContent() {
     };
   }, [selectedReport?.id, selectedReport?.reported_by, selectedReport?.matched_owner_id, supabase]);
 
-  const runOcr = async (image: Blob) => {
+  const runOcr = async (imageFile: File) => {
     setIsRunningOcr(true);
     setSubmitError("");
     setSubmitMessage("");
 
     try {
-      const recognizer = await loadTesseractRecognizer();
-      const result = await recognizer.recognize(image, "eng");
+      const ocrPayload = new FormData();
+      ocrPayload.append("photo", imageFile);
+      const detected = await detectParkingPlateFromPhotoAction(ocrPayload);
 
-      const extractedText = String(result?.data?.text || "").trim();
+      if (!detected.ok) {
+        throw new Error(detected.error || "Unable to detect a number plate from this photo.");
+      }
+
+      const extractedText = String(detected.rawText || detected.plate || "").trim();
       setOcrRawText(extractedText);
 
       const normalized = normalizeParkingReportPlateForSubmission({
         manualPlate: "",
-        ocrRawText: extractedText,
+        ocrRawText: String(detected.plate || extractedText),
       });
-      const fallbackFormatted = formatParkingReportPlateInput(extractedText);
+      const fallbackFormatted = formatParkingReportPlateInput(String(detected.plate || extractedText));
       const plateToApply = normalized.plate || fallbackFormatted;
       if (plateToApply) {
         setPlateInput(plateToApply);
-        setSubmitMessage("Plate extracted from photo. You can edit it before submitting.");
+        setSubmitMessage("Plate detected from photo. You can edit it before submitting.");
       } else {
         setSubmitError("Could not detect a clear plate from the image. Please enter it manually.");
       }
@@ -1080,7 +797,7 @@ function ParkingPatrolPageContent() {
       setSubmitError(
         error instanceof Error
           ? error.message
-          : "Unable to run OCR right now. Please enter plate manually."
+          : "Unable to detect plate right now. Please enter it manually."
       );
     } finally {
       setIsRunningOcr(false);
@@ -1158,6 +875,29 @@ function ParkingPatrolPageContent() {
       const finalPlate = String(result.plate || plateValidation.plate || plateInput || "")
         .trim()
         .toUpperCase();
+      let reportedAtIso = new Date().toISOString();
+      let incidentPhotoUrl = "";
+
+      if (result.reportId) {
+        const { data: createdReport } = await supabase
+          .from("parking_reports")
+          .select("created_at, photo_url")
+          .eq("id", result.reportId)
+          .maybeSingle();
+
+        if (createdReport?.created_at) {
+          reportedAtIso = String(createdReport.created_at);
+        }
+
+        const photoPath = String(createdReport?.photo_url || "").trim();
+        if (photoPath) {
+          const signedPhotoResult = await getParkingIncidentPhotoUrlAction(photoPath);
+          if (signedPhotoResult.ok && signedPhotoResult.url) {
+            incidentPhotoUrl = signedPhotoResult.url;
+          }
+        }
+      }
+
       setSubmitMessage(
         `Vehicle ${finalPlate} is not registered in NIE Campus Sync.\nYour report has been logged. Please handle this physically.`
       );
@@ -1165,7 +905,8 @@ function ParkingPatrolPageContent() {
         reportId: String(result.reportId || ""),
         plate: finalPlate,
         location: locationValue,
-        reportedAtIso: new Date().toISOString(),
+        reportedAtIso,
+        incidentPhotoUrl,
       });
     } else {
       setSubmitMessage("Report submitted successfully. The vehicle owner has been notified.");
@@ -1206,24 +947,25 @@ function ParkingPatrolPageContent() {
     }
   };
 
-  const handleDownloadUnmatchedPdf = () => {
+  const handleDownloadUnmatchedPdf = async () => {
     if (!unmatchedReport || typeof window === "undefined") return;
-    const appBaseUrl = window.location.origin.replace(/\/$/, "");
-    const printable = buildUnmatchedReportHtml(unmatchedReport, appBaseUrl);
+    const pdfResult = await downloadParkingIncidentReportPdf({
+      reportId: unmatchedReport.reportId,
+      plate: unmatchedReport.plate,
+      location: unmatchedReport.location,
+      status: "unmatched",
+      createdAtIso: unmatchedReport.reportedAtIso,
+      generatedAtIso: new Date().toISOString(),
+      incidentPhotoUrl: unmatchedReport.incidentPhotoUrl || "",
+      reporterNote: unmatchedReport.location,
+    });
 
-    const popup = window.open("", "_blank", "width=900,height=900");
-    if (!popup) {
-      setCopyDetailsMessage("Popup blocked. Allow popups to save as PDF.");
+    if (!pdfResult.ok) {
+      setCopyDetailsMessage(pdfResult.error || "Unable to download report PDF.");
       return;
     }
 
-    popup.document.write(printable);
-    popup.document.close();
-    popup.focus();
-    window.setTimeout(() => {
-      popup.print();
-    }, 350);
-    setCopyDetailsMessage("Print dialog opened. Choose Save as PDF.");
+    setCopyDetailsMessage("Report PDF downloaded.");
   };
 
   const handleSendThreadMessage = async () => {
@@ -1233,17 +975,35 @@ function ParkingPatrolPageContent() {
       return;
     }
 
+    const draftMessage = threadDraft.trim();
+    const tempMessageId = `temp-${Date.now()}`;
+    const optimisticSenderRole: ParkingMessageRow["sender_role"] = isOwner ? "owner" : "reporter";
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempMessageId,
+        report_id: selectedReport.id,
+        sender_id: userId || null,
+        sender_role: optimisticSenderRole,
+        message: draftMessage,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    setThreadDraft("");
     setIsSendingMessage(true);
     setThreadActionError("");
-    const response = await sendParkingMessageAction(selectedReport.id, threadDraft.trim());
+    const response = await sendParkingMessageAction(selectedReport.id, draftMessage);
     setIsSendingMessage(false);
 
     if (!response.ok) {
+      setMessages((prev) => prev.filter((message) => message.id !== tempMessageId));
+      setThreadDraft(draftMessage);
       setThreadActionError(response.error || "Unable to send message.");
       return;
     }
 
-    setThreadDraft("");
+    setMessages((prev) => prev.filter((message) => message.id !== tempMessageId));
     await loadMessages(selectedReport.id);
     if (userId) await loadReports(userId);
   };
@@ -1260,6 +1020,18 @@ function ParkingPatrolPageContent() {
       setThreadActionError(result.error || "Unable to acknowledge movement.");
       return;
     }
+
+    setReports((prev) =>
+      prev.map((report) =>
+        report.id === selectedReport.id
+          ? {
+              ...report,
+              status: "acknowledged",
+              acknowledged_at: report.acknowledged_at || new Date().toISOString(),
+            }
+          : report
+      )
+    );
 
     if (userId) await loadReports(userId);
     await loadMessages(selectedReport.id);
@@ -1354,48 +1126,55 @@ function ParkingPatrolPageContent() {
     }
   };
 
-  const handleDownloadTranscript = () => {
+  const handleDownloadTranscript = async () => {
     if (!selectedReport || messages.length === 0) return;
-    const header = [
-      `Report ID: ${selectedReport.id}`,
-      `Plate: ${selectedReport.license_plate}`,
-      `Reporter Note: ${selectedReport.location_description}`,
-      `Status: ${selectedReport.status}`,
-      `Created: ${new Date(selectedReport.created_at).toLocaleString()}`,
-      "",
-      "Transcript",
-      "----------",
-    ];
+    setIsDownloadingTranscript(true);
 
-    const body = messages.map((message) => {
+    let incidentPhotoUrl = selectedReportPhotoUrl;
+    if (!incidentPhotoUrl && selectedReport.photo_url) {
+      const signedPhoto = await getParkingIncidentPhotoUrlAction(selectedReport.photo_url);
+      if (signedPhoto.ok && signedPhoto.url) {
+        incidentPhotoUrl = signedPhoto.url;
+      }
+    }
+
+    const transcriptLines = messages.map((message) => {
       const label = getThreadRoleLabel(message, selectedReport, userId, participantTagById);
       return `[${new Date(message.created_at).toLocaleString()}] ${label}: ${message.message}`;
     });
 
-    const content = [...header, ...body].join("\n");
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const filePlate = selectedReport.license_plate.replace(/[^A-Z0-9]+/gi, "_");
-    const fileName = `parking-transcript-${filePlate || "report"}-${selectedReport.id}.txt`;
+    const pdfResult = await downloadParkingTranscriptPdf({
+      reportId: selectedReport.id,
+      plate: selectedReport.license_plate,
+      location: selectedReport.location_description,
+      status: selectedReport.status,
+      createdAtIso: selectedReport.created_at,
+      resolvedAtIso: selectedReport.resolved_at,
+      generatedAtIso: new Date().toISOString(),
+      incidentPhotoUrl,
+      transcriptLines,
+    });
 
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    setIsDownloadingTranscript(false);
+
+    if (!pdfResult.ok) {
+      setThreadActionError(pdfResult.error || "Unable to download transcript PDF.");
+      return;
+    }
+
+    setMobileToast({ kind: "info", message: "Transcript PDF downloaded." });
   };
 
   return (
-    <main className="min-h-screen w-full bg-[#0a0a0a] px-4 py-6 pb-20 pt-32 text-white">
+    <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 py-6 pb-20 pt-32 text-white">
+      <MobileToast
+        kind={mobileToast?.kind || "info"}
+        message={mobileToast?.message || ""}
+        open={Boolean(mobileToast?.message)}
+        onClose={() => setMobileToast(null)}
+      />
       <div className="mx-auto w-full max-w-[1200px] space-y-3">
-        <header
-          className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-4 backdrop-blur-md"
-          style={{
-            clipPath: "polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%)",
-          }}
-        >
+        <header className="rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(37,99,235,0.14)_0%,rgba(255,176,0,0.1)_55%,rgba(255,255,255,0.04)_100%)] p-4 shadow-[0_18px_70px_rgba(0,0,0,0.5)] backdrop-blur-md">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Parking Patrol</p>
           <h1 className="mt-1 text-3xl font-black tracking-tight text-white">Live Incident Desk</h1>
           <p className="mt-2 text-sm leading-relaxed text-[#aaa]">
@@ -1408,7 +1187,7 @@ function ParkingPatrolPageContent() {
             </span>
             <Link
               href="/profile/reports"
-              className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/10 px-4 text-xs font-bold text-[#aaa]"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl border border-accent-blue/45 bg-accent-blue/20 px-4 text-xs font-bold text-white"
             >
               History Archive
             </Link>
@@ -1416,14 +1195,14 @@ function ParkingPatrolPageContent() {
         </header>
 
         {schemaError ? (
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
+          <div className="hidden rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300 md:block">
             {schemaError}
           </div>
         ) : null}
 
         <section className="grid gap-3 lg:grid-cols-12 lg:items-start">
           <div className="space-y-3 lg:col-span-5">
-          <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4">
+          <div className="rounded-[24px] border border-white/10 bg-black/35 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Live Incident</p>
               <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-xs font-bold text-[#888]">
@@ -1449,7 +1228,7 @@ function ParkingPatrolPageContent() {
               </p>
             )}
           </div>
-          <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4">
+          <div className="rounded-[24px] border border-white/10 bg-black/35 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Report Vehicle</p>
@@ -1466,19 +1245,21 @@ function ParkingPatrolPageContent() {
             </div>
 
             {submitMessage ? (
-              <p className="mt-3 rounded-xl border border-green-500/20 bg-green-500/10 px-3 py-2 text-sm whitespace-pre-line text-green-300">
+              <p className="mt-3 hidden rounded-xl border border-green-500/20 bg-green-500/10 px-3 py-2 text-sm whitespace-pre-line text-green-300 md:block">
                 {submitMessage}
               </p>
             ) : null}
             {submitError ? (
-              <p className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <p className="mt-3 hidden items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300 md:inline-flex">
                 <AlertCircle className="h-4 w-4" />
                 {submitError}
               </p>
             ) : null}
             {unmatchedReport ? (
               <div className="mt-3 rounded-2xl border border-amber-400/35 bg-gradient-to-br from-amber-400/15 via-amber-500/5 to-sky-500/10 p-4 text-center shadow-[0_20px_45px_rgba(8,12,20,0.45)]">
-                <p className="text-3xl">??</p>
+                <span className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full border border-amber-300/35 bg-amber-400/15 text-amber-200">
+                  <ShieldAlert className="h-6 w-6" />
+                </span>
                 <p className="mt-2 text-base font-black tracking-tight text-white">Vehicle not registered in NIE Sync</p>
                 <p className="mt-1 text-xs leading-relaxed text-[#bbb]">
                   Keep this report for records and use the branded PDF for campus-security follow-up.
@@ -1504,7 +1285,7 @@ function ParkingPatrolPageContent() {
                     <Download className="h-4 w-4" />
                     Download PDF
                   </button>
-                  {copyDetailsMessage ? <p className="text-xs text-[#888]">{copyDetailsMessage}</p> : null}
+                  {copyDetailsMessage ? <p className="hidden text-xs text-[#888] md:block">{copyDetailsMessage}</p> : null}
                 </div>
               </div>
             ) : null}
@@ -1526,7 +1307,7 @@ function ParkingPatrolPageContent() {
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Photo Upload (Optional)</p>
                   <p className="mt-1 text-xs text-[#666]">
-                    Optional. Add a photo for OCR auto-detection and stronger incident context.
+                    Optional. Add a photo for automatic plate detection and stronger incident context.
                   </p>
                   <label className="relative mt-2 flex min-h-[160px] w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-white/10 bg-white/[0.02] p-6 transition-colors active:border-[#f5a623]/40">
                     <input
@@ -1560,8 +1341,8 @@ function ParkingPatrolPageContent() {
                     ) : (
                       <>
                         <Camera className="h-8 w-8 text-[#555]" />
-                        <p className="text-sm text-[#888]">{isRunningOcr ? "Extracting plate..." : "Tap to capture or upload"}</p>
-                        <p className="text-xs text-[#555]">Optional · photo will be compressed automatically</p>
+                        <p className="text-sm text-[#888]">{isRunningOcr ? "Detecting plate..." : "Tap to capture or upload"}</p>
+                        <p className="text-xs text-[#555]">Optional - photo will be compressed automatically</p>
                       </>
                     )}
                   </label>
@@ -1580,7 +1361,7 @@ function ParkingPatrolPageContent() {
                         className="mt-2 w-full rounded-xl border border-[#f5a623]/20 bg-[#111] p-4 text-center font-mono text-xl font-black tracking-widest text-[#f5a623] outline-none"
                       />
                     )}
-                    <p className="mt-2 text-center text-xs text-[#555]">OCR auto-filled · Edit if incorrect</p>
+                    <p className="mt-2 text-center text-xs text-[#555]">Auto-filled by plate recognizer - edit if incorrect</p>
                   </div>
                 ) : null}
 
@@ -1647,7 +1428,7 @@ function ParkingPatrolPageContent() {
           </div>
           </div>
 
-          <div className="rounded-2xl border border-white/[0.06] bg-[#111] p-4 lg:col-span-7 lg:min-h-[900px]">
+          <div className="rounded-[24px] border border-white/10 bg-black/35 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm lg:col-span-7 lg:min-h-[900px]">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Live Incident Thread</h2>
                 {selectedReport ? (
@@ -1673,13 +1454,7 @@ function ParkingPatrolPageContent() {
                 )
               ) : (
                 <div className="space-y-4">
-                  <div
-                    className="rounded-2xl border border-white/[0.06] bg-[#161616] p-4"
-                    style={{
-                      clipPath:
-                        "polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%)",
-                    }}
-                  >
+                  <div className="rounded-[22px] border border-white/[0.08] bg-[#161616] p-4">
                     <div className="px-2 pb-4 sm:px-5">
                       <div className="relative flex items-start justify-between">
                         <div className="absolute left-3 right-3 top-3 h-[2px] rounded-full bg-white/10" />
@@ -1928,19 +1703,25 @@ function ParkingPatrolPageContent() {
                     {!chatWindowOpen || selectedReport.status === "resolved" ? (
                       <button
                         type="button"
-                        onClick={handleDownloadTranscript}
-                        disabled={messages.length === 0}
+                        onClick={() => {
+                          void handleDownloadTranscript();
+                        }}
+                        disabled={messages.length === 0 || isDownloadingTranscript}
                         className="mt-2 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-transparent text-sm font-bold text-[#aaa] disabled:opacity-60"
                       >
-                        <Download className="h-4 w-4" />
-                        Download Transcript
+                        {isDownloadingTranscript ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                        {isDownloadingTranscript ? "Preparing transcript..." : "Download Transcript PDF"}
                       </button>
                     ) : null}
                   </div>
                 </div>
 
                 {threadActionError ? (
-                  <p className="inline-flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                  <p className="hidden items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300 md:inline-flex">
                     <AlertCircle className="h-4 w-4" />
                     {threadActionError}
                   </p>
@@ -1995,7 +1776,7 @@ export default function ParkingPatrolPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen w-full bg-[#0a0a0a] px-4 py-6 pb-20 pt-32 text-white">
+        <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 py-6 pb-20 pt-32 text-white">
           <div className="mx-auto w-full max-w-[1200px] animate-pulse space-y-3">
             <div className="h-40 rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
             <div className="grid gap-3 lg:grid-cols-12">
@@ -2013,5 +1794,6 @@ export default function ParkingPatrolPage() {
     </Suspense>
   );
 }
+
 
 

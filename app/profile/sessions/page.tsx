@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { MobileToast } from "@/components/MobileToast";
 import { Loader2, Laptop, Monitor, Smartphone, LogOut } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -96,10 +97,24 @@ export default function SessionsPage() {
   const [isSigningOutOthers, setIsSigningOutOthers] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [mobileToast, setMobileToast] = useState<{
+    kind: "error" | "success";
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchUserAndSessions();
   }, []);
+
+  useEffect(() => {
+    if (!error) return;
+    setMobileToast({ kind: "error", message: error });
+  }, [error]);
+
+  useEffect(() => {
+    if (!success) return;
+    setMobileToast({ kind: "success", message: success });
+  }, [success]);
 
   const loadSessions = async (userId: string, activeSessionId: string) => {
     setIsSessionsLoading(true);
@@ -219,7 +234,13 @@ export default function SessionsPage() {
   const previousSessions = sessions.filter(s => s.revoked_at).slice(0, 5);
 
   return (
-    <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
+      <MobileToast
+        kind={mobileToast?.kind || "info"}
+        message={mobileToast?.message || ""}
+        open={Boolean(mobileToast?.message)}
+        onClose={() => setMobileToast(null)}
+      />
       <div className="mx-auto w-full max-w-5xl">
 
         <motion.div
@@ -227,7 +248,7 @@ export default function SessionsPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <header className="mb-8 rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7">
+          <header className="mb-8 rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(37,99,235,0.14)_0%,rgba(255,176,0,0.1)_55%,rgba(255,255,255,0.04)_100%)] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.5)] md:p-7">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-text-secondary">
               Account Security
             </p>
@@ -240,12 +261,12 @@ export default function SessionsPage() {
           </header>
 
           {(error || success) && (
-            <div className={`p-4 mb-6 rounded-sm border ${error ? "bg-red-500/10 border-red-500/30 text-red-200" : "bg-green-500/10 border-green-500/30 text-green-200"}`}>
+            <div className={`mb-6 hidden rounded-sm border p-4 md:block ${error ? "bg-red-500/10 border-red-500/30 text-red-200" : "bg-green-500/10 border-green-500/30 text-green-200"}`}>
               {error || success}
             </div>
           )}
 
-          <div className="glass-card p-6 md:p-8 rounded-sm border border-white/10 relative">
+          <div className="relative rounded-[24px] border border-white/10 bg-black/35 p-6 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm md:p-8">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-8 border-b border-white/10 pb-6">
               <div>
                 <h3 className="text-sm font-black uppercase tracking-[0.2em] text-white flex items-center gap-2">
@@ -311,7 +332,7 @@ export default function SessionsPage() {
                             </p>
                             <div className="text-xs text-text-secondary mt-1.5 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
                               <span>{locationLabel}</span>
-                              <span className="hidden sm:inline opacity-50">â€¢</span>
+                              <span className="hidden sm:inline opacity-50">|</span>
                               <span>Last active {formatDateTime(sessionRow.last_seen_at)}</span>
                             </div>
                           </div>

@@ -38,7 +38,12 @@ function patchSafeGetSession(supabase: SupabaseClient) {
         'supabase.auth.getSession'
       );
     } catch (error: any) {
-      console.error('[Supabase] getSession failed:', error?.message || error);
+      const message = String(error?.message || "");
+      const isExpectedTimeout = /timed out/i.test(message);
+      const isExpectedMissingSession = /auth session missing/i.test(message);
+      if (!isExpectedTimeout && !isExpectedMissingSession) {
+        console.warn('[Supabase] getSession fallback:', message || error);
+      }
       return {
         data: { session: null },
         error: {

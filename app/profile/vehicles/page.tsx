@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Car, Edit3, Loader2, Plus, Save, Trash2, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { MobileToast } from "@/components/MobileToast";
 import {
   formatOwnerVehiclePlateInput,
   getOwnerVehiclePlateFormatsHint,
@@ -78,6 +79,7 @@ export default function ProfileVehiclesPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [mobileToast, setMobileToast] = useState<{ kind: "error" | "success"; message: string } | null>(null);
   const [userId, setUserId] = useState("");
 
   const [hasVehicle, setHasVehicle] = useState(false);
@@ -153,6 +155,16 @@ export default function ProfileVehiclesPage() {
       active = false;
     };
   }, [supabase]);
+
+  useEffect(() => {
+    if (!error) return;
+    setMobileToast({ kind: "error", message: error });
+  }, [error]);
+
+  useEffect(() => {
+    if (!success) return;
+    setMobileToast({ kind: "success", message: success });
+  }, [success]);
 
   const startEditing = () => {
     setSuccess("");
@@ -250,9 +262,11 @@ export default function ProfileVehiclesPage() {
       if (primaryValidation.error) throw new Error(primaryValidation.error);
 
       const normalizedAdditional = additionalVehicles
-        .map((vehicle) => {
+        .map((vehicle, index) => {
           const draft = formatOwnerVehiclePlateInput(vehicle.vehicleNo);
-          if (!draft) return null;
+          if (!draft) {
+            throw new Error(`Additional vehicle ${index + 2} must include a valid vehicle number.`);
+          }
           const validation = validateOwnerVehiclePlate(draft, {
             required: true,
             invalidMessage: `Each additional vehicle must be valid. ${getOwnerVehiclePlateFormatsHint()}`,
@@ -264,17 +278,7 @@ export default function ProfileVehiclesPage() {
             vehicle_brand_model: vehicle.vehicleBrandModel.trim() || null,
             vehicle_color: vehicle.vehicleColor.trim() || null,
           };
-        })
-        .filter(
-          (
-            vehicle
-          ): vehicle is {
-            vehicle_no: string;
-            vehicle_type: string | null;
-            vehicle_brand_model: string | null;
-            vehicle_color: string | null;
-          } => Boolean(vehicle)
-        );
+        });
 
       const deDup = new Set<string>();
       for (const vehicle of normalizedAdditional) {
@@ -339,13 +343,19 @@ export default function ProfileVehiclesPage() {
   };
 
   return (
-    <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
+      <MobileToast
+        kind={mobileToast?.kind || "info"}
+        message={mobileToast?.message || ""}
+        open={Boolean(mobileToast?.message)}
+        onClose={() => setMobileToast(null)}
+      />
       <div className="mx-auto w-full max-w-5xl">
         <motion.header
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
-          className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7"
+          className="rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(37,99,235,0.14)_0%,rgba(255,176,0,0.1)_55%,rgba(255,255,255,0.04)_100%)] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.5)] md:p-7"
         >
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-text-secondary">Profile</p>
           <h1 className="mt-1 text-2xl font-black tracking-tight md:text-4xl">Your Vehicles</h1>
@@ -355,17 +365,17 @@ export default function ProfileVehiclesPage() {
         </motion.header>
 
         {error ? (
-          <div className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div className="mt-4 hidden rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200 md:block">
             {error}
           </div>
         ) : null}
         {success ? (
-          <div className="mt-4 rounded-xl border border-green-500/35 bg-green-500/10 px-4 py-3 text-sm text-green-200">
+          <div className="mt-4 hidden rounded-xl border border-green-500/35 bg-green-500/10 px-4 py-3 text-sm text-green-200 md:block">
             {success}
           </div>
         ) : null}
 
-        <section className="mt-5 rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-6">
+        <section className="mt-5 rounded-[24px] border border-white/10 bg-black/35 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm md:p-6">
           {isLoading ? (
             <div className="flex h-40 items-center justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-white/60" />

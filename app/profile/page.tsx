@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { MobileToast } from "@/components/MobileToast";
 import { normalizePhoneNumber, validateRequiredPhoneNumber } from "@/lib/phone";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
@@ -117,6 +118,30 @@ function isUsernameAlreadyTakenError(error: any) {
   return error?.code === "23505" && details.includes("username");
 }
 
+function mapProfileUpdateError(error: any) {
+  if (isUsernameAlreadyTakenError(error)) {
+    return "This username is already taken.";
+  }
+
+  const message = String(error?.message || "");
+  const normalized = `${error?.code || ""} ${message}`.toLowerCase();
+
+  if (normalized.includes("once every 30 days")) {
+    return "Username can be changed only once every 30 days.";
+  }
+  if (normalized.includes("3 times in 365 days") || normalized.includes("at most 3 times")) {
+    return "Username can be changed only 3 times in a 365-day period.";
+  }
+  if (normalized.includes("usn cannot be changed")) {
+    return "USN is locked after initial profile setup and cannot be changed.";
+  }
+  if (normalized.includes("user type cannot be changed")) {
+    return "User type is locked after initial profile setup and cannot be changed.";
+  }
+
+  return message || "Unable to save profile.";
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -134,6 +159,7 @@ export default function ProfilePage() {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [mobileToast, setMobileToast] = useState<{ kind: "error" | "success"; message: string } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -192,6 +218,16 @@ export default function ProfilePage() {
       active = false;
     };
   }, [router, supabase]);
+
+  useEffect(() => {
+    if (!error) return;
+    setMobileToast({ kind: "error", message: error });
+  }, [error]);
+
+  useEffect(() => {
+    if (!success) return;
+    setMobileToast({ kind: "success", message: success });
+  }, [success]);
 
   const handleAvatarUpload = async (file: File) => {
     if (!userId) return;
@@ -274,8 +310,6 @@ export default function ProfilePage() {
         last_name: lastName,
         username: normalizedUsername || null,
         phone: normalizePhoneNumber(normalizedPhone),
-        usn: String(draft.usn || "").trim().toUpperCase() || null,
-        user_type: String(draft.userType || "Student") || null,
         batch: String(draft.batch || "").trim() || null,
         year_of_study: String(draft.year || "").trim() || null,
         role,
@@ -287,10 +321,7 @@ export default function ProfilePage() {
       const { error: updateError } = await supabase.from("profiles").update(payload).eq("id", userId);
 
       if (updateError) {
-        if (isUsernameAlreadyTakenError(updateError)) {
-          throw new Error("This username is already taken.");
-        }
-        throw updateError;
+        throw new Error(mapProfileUpdateError(updateError));
       }
 
       setProfile((prev) => (prev ? { ...prev, ...payload } : prev));
@@ -309,7 +340,7 @@ export default function ProfilePage() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+      <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
         <div className="mx-auto w-full max-w-5xl animate-pulse space-y-5">
           <div className="h-36 rounded-3xl border border-white/10 bg-white/[0.03]" />
           <div className="h-72 rounded-3xl border border-white/10 bg-white/[0.03]" />
@@ -319,13 +350,19 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="min-h-screen bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
+      <MobileToast
+        kind={mobileToast?.kind || "info"}
+        message={mobileToast?.message || ""}
+        open={Boolean(mobileToast?.message)}
+        onClose={() => setMobileToast(null)}
+      />
       <div className="mx-auto w-full max-w-5xl">
         <motion.header
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.28 }}
-          className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7"
+          className="rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(37,99,235,0.14)_0%,rgba(255,176,0,0.1)_55%,rgba(255,255,255,0.04)_100%)] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.5)] md:p-7"
         >
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-4">
@@ -363,23 +400,20 @@ export default function ProfilePage() {
                   {displayName}
                   {userEmail.toLowerCase().endsWith("@nie.ac.in") && profile?.email_verified && (
                     <motion.span
-                      initial={{ scale: 0, opacity: 0 }}
-                      animate={{ 
-                        scale: 1, 
-                        opacity: 1,
-                        rotate: 360
-                      }}
-                      whileHover={{ scale: 1.15, filter: "drop-shadow(0 0 8px rgba(29, 155, 240, 0.6))" }}
-                      transition={{ 
-                        rotate: { repeat: Infinity, duration: 15, ease: "linear" },
-                        scale: { type: "spring", stiffness: 260, damping: 15, delay: 0.1 }
-                      }}
-                      className="ml-3 inline-flex items-center justify-center text-[#1d9bf0]"
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.25 }}
+                      className="relative ml-3 inline-flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-[#1d9bf0]/35 bg-[#1d9bf0]/12 shadow-[0_0_18px_rgba(29,155,240,0.35)]"
                       title="Verified Campus Member"
                     >
-                      <svg viewBox="0 0 24 24" className="h-6 w-6 md:h-7 md:w-7" fill="currentColor">
-                        <path d="M22.5 12.5c0-1.58-.875-2.95-2.148-3.6.154-.435.238-.905.238-1.4 0-2.21-1.71-3.998-3.918-3.998-.47 0-.92.084-1.336.25C14.818 2.415 13.51 1.5 12 1.5s-2.816.917-3.337 2.25c-.416-.165-.866-.25-1.336-.25-2.21 0-3.918 1.792-3.918 3.998 0 .495.084.965.238 1.4-1.273.65-2.148 2.02-2.148 3.6 0 1.52.816 2.846 2.026 3.522-.05.31-.076.63-.076.953 0 2.21 1.71 3.998 3.918 3.998.47 0 .92-.084 1.336-.25C9.182 21.585 10.49 22.5 12 22.5s2.816-.917 3.337-2.25c.416.165.866.25 1.336.25 2.21 0 3.918-1.792 3.918-3.998 0-.323-.027-.643-.076-.953 1.21-.676 2.026-2.002 2.026-3.522zm-12.062 4.417c-.36.36-.946.36-1.306 0l-3.36-3.36c-.36-.36-.36-.945 0-1.305.36-.36.945-.36 1.305 0l2.707 2.707 6.02-6.02c.36-.36.945-.36 1.305 0 .36.36.36.946 0 1.306l-6.67 6.672z"></path>
-                      </svg>
+                      <img
+                        src="/blue_tick.gif"
+                        alt=""
+                        className="h-full w-full object-contain"
+                        loading="eager"
+                        decoding="sync"
+                        aria-hidden="true"
+                      />
                     </motion.span>
                   )}
                 </h1>
@@ -440,7 +474,7 @@ export default function ProfilePage() {
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+              className="mt-4 hidden rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200 md:block"
             >
               {error}
             </motion.div>
@@ -450,7 +484,7 @@ export default function ProfilePage() {
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-green-500/35 bg-green-500/10 px-4 py-3 text-sm text-green-200"
+              className="mt-4 hidden items-center gap-2 rounded-xl border border-green-500/35 bg-green-500/10 px-4 py-3 text-sm text-green-200 md:inline-flex"
             >
               <CheckCircle2 className="h-4 w-4" />
               {success}
@@ -547,6 +581,9 @@ export default function ProfilePage() {
                   }
                   className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm lowercase text-white outline-none transition-colors focus:border-accent-blue/50"
                 />
+                <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/45">
+                  Username changes are limited to once every 30 days and max 3 per 365 days.
+                </p>
               </label>
 
               <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
@@ -567,27 +604,21 @@ export default function ProfilePage() {
                 />
               </label>
 
-              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
-                User Type
-                <select
-                  value={draft.userType}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, userType: event.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
-                >
-                  <option value="Student" className="bg-campus-black">Student</option>
-                  <option value="Faculty" className="bg-campus-black">Faculty</option>
-                </select>
-              </label>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">User Type</p>
+                <p className="mt-1 text-sm font-semibold text-white">{profile?.user_type || "-"}</p>
+                <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+                  Locked after signup
+                </p>
+              </div>
 
-              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
-                USN
-                <input
-                  type="text"
-                  value={draft.usn}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, usn: event.target.value.toUpperCase() }))}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
-                />
-              </label>
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">USN</p>
+                <p className="mt-1 text-sm font-semibold text-white">{profile?.usn || "-"}</p>
+                <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+                  Locked after initial setup
+                </p>
+              </div>
 
               <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
                 Batch

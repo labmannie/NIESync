@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
+import { MobileToast } from "@/components/MobileToast";
 import { GoogleMark } from "@/app/_components/GoogleMark";
 import {
   normalizePhoneNumber,
@@ -68,6 +69,7 @@ function SignupContent() {
   const [toastMessage, setToastMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
+  const [mobileToast, setMobileToast] = useState<{ kind: "error" | "success"; message: string } | null>(null);
 
   useEffect(() => {
     if (searchParams.get("error") === "invalid-domain") {
@@ -87,6 +89,11 @@ function SignupContent() {
     const timer = window.setTimeout(() => setToastMessage(""), 3200);
     return () => window.clearTimeout(timer);
   }, [toastMessage]);
+
+  useEffect(() => {
+    if (!error) return;
+    setMobileToast({ kind: "error", message: error });
+  }, [error]);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -139,6 +146,7 @@ function SignupContent() {
   };
 
   const nextStep = async () => {
+    setError("");
     // Validation per step
     if (step === 1) {
       const normalizedEmail = formData.email.trim().toLowerCase();
@@ -422,13 +430,19 @@ function SignupContent() {
 
   return (
     <main className="min-h-screen w-full bg-campus-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-accent-blue/30 p-4 pt-28">
+      <MobileToast
+        kind={mobileToast?.kind || "error"}
+        message={mobileToast?.message || ""}
+        open={Boolean(mobileToast?.message)}
+        onClose={() => setMobileToast(null)}
+      />
       <AnimatePresence>
         {toastMessage && (
           <motion.div
             initial={{ opacity: 0, y: -18 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -18 }}
-            className="fixed top-24 right-4 z-50 bg-red-500/95 text-white text-sm px-4 py-3 rounded-sm shadow-2xl border border-red-300/40"
+            className="fixed top-24 right-4 z-50 hidden rounded-sm border border-red-300/40 bg-red-500/95 px-4 py-3 text-sm text-white shadow-2xl md:block"
           >
             {toastMessage}
           </motion.div>
@@ -472,7 +486,7 @@ function SignupContent() {
                 initial={{ opacity: 0, height: 0, marginBottom: 0 }}
                 animate={{ opacity: 1, height: "auto", marginBottom: 20 }}
                 exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-sm text-sm flex items-start gap-2"
+                className="mb-5 hidden items-start gap-2 rounded-sm border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400 md:flex"
               >
                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>{error}</span>

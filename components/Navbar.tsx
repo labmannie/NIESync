@@ -17,6 +17,60 @@ type NavbarProfile = {
   avatar_url: string | null;
 };
 
+const NAV_PROFILE_CACHE_KEY = "niesync_nav_profile";
+const NAV_PROFILE_USER_ID_KEY = "niesync_nav_user_id";
+const TRANSIENT_AUTH_ERROR_REGEX = /timed out|abort|network|fetch/i;
+
+function readCachedNavbarProfileState(): { userId: string; profile: NavbarProfile | null } {
+  if (typeof window === "undefined") {
+    return { userId: "", profile: null };
+  }
+
+  try {
+    const userId = String(window.localStorage.getItem(NAV_PROFILE_USER_ID_KEY) || "").trim();
+    const rawProfile = window.localStorage.getItem(NAV_PROFILE_CACHE_KEY);
+    if (!rawProfile) {
+      return { userId, profile: null };
+    }
+
+    return {
+      userId,
+      profile: JSON.parse(rawProfile) as NavbarProfile,
+    };
+  } catch {
+    return { userId: "", profile: null };
+  }
+}
+
+function writeCachedNavbarProfileState(userId: string, profile: NavbarProfile | null) {
+  if (typeof window === "undefined") return;
+
+  try {
+    if (!userId) {
+      window.localStorage.removeItem(NAV_PROFILE_CACHE_KEY);
+      window.localStorage.removeItem(NAV_PROFILE_USER_ID_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(NAV_PROFILE_USER_ID_KEY, userId);
+    if (profile) {
+      window.localStorage.setItem(NAV_PROFILE_CACHE_KEY, JSON.stringify(profile));
+    } else {
+      window.localStorage.removeItem(NAV_PROFILE_CACHE_KEY);
+    }
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function clearCachedNavbarProfileState() {
+  writeCachedNavbarProfileState("", null);
+}
+
+function isTransientNavbarAuthError(message: string) {
+  return TRANSIENT_AUTH_ERROR_REGEX.test(String(message || ""));
+}
+
 function resolveProfileDisplayName(profile: NavbarProfile | null) {
   const first = String(profile?.first_name || "").trim();
   const last = String(profile?.last_name || "").trim();
@@ -48,47 +102,137 @@ export function Navbar() {
   const [profile, setProfile] = useState<NavbarProfile | null>(null);
 
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const authSyncVersionRef = useRef(0);
   const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
+    let isActive = true;
     setMounted(true);
+    const cachedState = readCachedNavbarProfileState();
+    if (cachedState.userId) {
+      setIsAuthenticated(true);
+      if (cachedState.profile) {
+        setProfile(cachedState.profile);
+      }
+    }
 
-    const loadProfile = async (userId: string) => {
-      const { data } = await supabase
-        .from("profiles")
-        .select("id, first_name, last_name, username, avatar_url")
-        .eq("id", userId)
-        .maybeSingle();
-      setProfile((data || null) as NavbarProfile | null);
+    const applySignedOutState = (version: number) => {
+      if (!isActive || version !== authSyncVersionRef.current) return;
+      setIsAuthenticated(false);
+      setProfile(null);
+      setIsProfileMenuOpen(false);
+      clearCachedNavbarProfileState();
     };
 
-    const checkAuth = async () => {
-      const { user } = await resolveClientUser(supabase);
-      const hasSession = Boolean(user);
-      setIsAuthenticated(hasSession);
+    const loadProfile = async (userId: string, version: number) => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, first_name, last_name, username, avatar_url")
+          .eq("id", userId)
+          .maybeSingle();
 
-      if (user?.id) {
-        await loadProfile(user.id);
-      } else {
-        setProfile(null);
+        if (!isActive || version !== authSyncVersionRef.current) return;
+        if (error) {
+          console.warn("[Navbar] Unable to refresh profile:", error.message || error);
+          return;
+        }
+
+        const resolvedProfile = (data || null) as NavbarProfile | null;
+        if (!resolvedProfile) {
+          // Keep the last known profile snapshot instead of blanking the navbar identity
+          // on transient empty responses.
+          return;
+        }
+        setProfile(resolvedProfile);
+        writeCachedNavbarProfileState(userId, resolvedProfile);
+      } catch (error) {
+        if (!isActive || version !== authSyncVersionRef.current) return;
+        console.warn(
+          "[Navbar] Failed to refresh profile:",
+          (error as { message?: string })?.message || error
+        );
       }
     };
 
-    void checkAuth();
+    const applySignedInState = async (userId: string, version: number) => {
+      if (!isActive || version !== authSyncVersionRef.current) return;
+      setIsAuthenticated(true);
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const hasSession = Boolean(session);
-      setIsAuthenticated(hasSession);
-
-      if (session?.user?.id) {
-        await loadProfile(session.user.id);
+      const latestCache = readCachedNavbarProfileState();
+      if (latestCache.userId === userId && latestCache.profile) {
+        setProfile(latestCache.profile);
       } else {
-        setProfile(null);
+        setProfile((current) => (current?.id === userId ? current : null));
       }
+
+      writeCachedNavbarProfileState(userId, latestCache.userId === userId ? latestCache.profile : null);
+      await loadProfile(userId, version);
+    };
+
+    const syncAuthState = async (version = ++authSyncVersionRef.current) => {
+      let sessionUserId = "";
+      let sessionErrorMessage = "";
+
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        sessionUserId = String(data?.session?.user?.id || "");
+        sessionErrorMessage = String(error?.message || "");
+      } catch (error) {
+        sessionErrorMessage = String((error as { message?: string })?.message || "");
+      }
+
+      if (sessionUserId) {
+        await applySignedInState(sessionUserId, version);
+        return;
+      }
+
+      const { user, errorMessage } = await resolveClientUser(supabase);
+      if (!isActive || version !== authSyncVersionRef.current) return;
+
+      const resolvedUserId = String(user?.id || "");
+      if (resolvedUserId) {
+        await applySignedInState(resolvedUserId, version);
+        return;
+      }
+
+      const combinedErrorMessage = `${sessionErrorMessage} ${errorMessage}`.trim();
+      const fallbackCache = readCachedNavbarProfileState();
+      if (fallbackCache.userId && isTransientNavbarAuthError(combinedErrorMessage)) {
+        setIsAuthenticated(true);
+        if (fallbackCache.profile) {
+          setProfile(fallbackCache.profile);
+        }
+        return;
+      }
+
+      applySignedOutState(version);
+    };
+
+    void syncAuthState();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      const version = ++authSyncVersionRef.current;
+      const sessionUserId = String(session?.user?.id || "");
+
+      if (event === "SIGNED_OUT") {
+        // Re-check once before applying signed-out UI to avoid false negatives during
+        // token refresh/network blips.
+        void syncAuthState(version);
+        return;
+      }
+
+      if (sessionUserId) {
+        void applySignedInState(sessionUserId, version);
+        return;
+      }
+
+      void syncAuthState(version);
     });
 
     return () => {
+      isActive = false;
       authListener.subscription.unsubscribe();
     };
   }, [supabase]);
@@ -119,7 +263,11 @@ export function Navbar() {
   }, [isProfileMenuOpen]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      clearCachedNavbarProfileState();
+    }
     setIsAuthenticated(false);
     setProfile(null);
     setIsProfileMenuOpen(false);

@@ -14,6 +14,8 @@ import {
 
 const INCIDENT_PHOTOS_BUCKET = "incident-photos";
 const LOCATION_DESCRIPTION_MAX_LENGTH = 180;
+const PLATE_RECOGNIZER_API_URL = "https://api.platerecognizer.com/v1/plate-reader/";
+const PLATE_RECOGNIZER_TIMEOUT_MS = 15000;
 const INCIDENT_PHOTO_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -148,6 +150,12 @@ async function uploadIncidentPhoto(userId: string, imageFile: File) {
   return data?.path || path;
 }
 
+function resolvePlateRecognizerToken() {
+  return String(
+    process.env.PLATE_RECOGNIZER_API_TOKEN || process.env.PLATE_RECOGNIZER_TOKEN || ""
+  ).trim();
+}
+
 function resolveAppBaseUrl(clientBaseUrl?: string) {
   const fromClient = String(clientBaseUrl || "").trim();
   if (fromClient) {
@@ -187,6 +195,116 @@ export async function getParkingIncidentPhotoUrlAction(
   }
 
   return { ok: true, url: String(data?.signedUrl || "") };
+}
+
+export async function detectParkingPlateFromPhotoAction(
+  formData: FormData
+): Promise<{ ok: boolean; plate?: string; rawText?: string; error?: string }> {
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return { ok: false, error: "You must be logged in to detect a number plate." };
+  }
+
+  const photo = formData.get("photo");
+  if (!(photo instanceof File) || photo.size <= 0) {
+    return { ok: false, error: "Please upload a valid incident photo first." };
+  }
+
+  const apiToken = resolvePlateRecognizerToken();
+  if (!apiToken) {
+    return {
+      ok: false,
+      error:
+        "Plate recognizer is not configured. Missing PLATE_RECOGNIZER_API_TOKEN in environment variables.",
+    };
+  }
+
+  const requestBody = new FormData();
+  requestBody.append("upload", photo);
+  requestBody.append("regions", "in");
+  requestBody.append("config", JSON.stringify({ region: "strict" }));
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PLATE_RECOGNIZER_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(PLATE_RECOGNIZER_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${apiToken}`,
+      },
+      body: requestBody,
+      signal: controller.signal,
+      cache: "no-store",
+    });
+
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const apiError =
+        String(payload?.error || payload?.message || payload?.detail || "").trim() ||
+        `API request failed with status ${response.status}.`;
+      return { ok: false, error: `Plate recognizer error: ${apiError}` };
+    }
+
+    const results = Array.isArray(payload?.results) ? payload.results : [];
+    if (results.length === 0) {
+      return {
+        ok: false,
+        error: "No clear number plate was detected. Try a closer, sharper image or enter manually.",
+      };
+    }
+
+    const rankedResults = [...results].sort(
+      (a, b) => Number(b?.score || 0) - Number(a?.score || 0)
+    );
+    const bestResult = rankedResults[0];
+    const bestPlate = String(
+      bestResult?.plate ||
+        (Array.isArray(bestResult?.candidates) ? bestResult.candidates[0]?.plate : "") ||
+        ""
+    )
+      .trim()
+      .toUpperCase();
+
+    if (!bestPlate) {
+      return {
+        ok: false,
+        error: "Detected plate text was empty. Please enter the plate manually.",
+      };
+    }
+
+    const candidateText = Array.isArray(bestResult?.candidates)
+      ? bestResult.candidates
+          .map((candidate: any) => String(candidate?.plate || "").trim().toUpperCase())
+          .filter(Boolean)
+          .join(" ")
+      : "";
+
+    return {
+      ok: true,
+      plate: bestPlate,
+      rawText: candidateText || bestPlate,
+    };
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      return {
+        ok: false,
+        error: `Plate recognizer timed out after ${PLATE_RECOGNIZER_TIMEOUT_MS}ms.`,
+      };
+    }
+    return {
+      ok: false,
+      error: String(error?.message || "Unable to process photo with plate recognizer."),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function submitParkingReportAction(

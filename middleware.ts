@@ -2,6 +2,9 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseFetch, getPublicSupabaseConfig } from "@/utils/supabase/config";
 
+const TRANSIENT_AUTH_ERROR_REGEX =
+  /timed out|timeout|network|fetch|abort|econnreset|enotfound|temporar|gateway|503|504/i;
+
 function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     promise,
@@ -37,6 +40,29 @@ function copySupabaseCookies(source: NextResponse, target: NextResponse) {
   source.cookies.getAll().forEach((cookie) => {
     target.cookies.set(cookie.name, cookie.value);
   });
+}
+
+function hasSupabaseAuthCookie(request: NextRequest) {
+  return request.cookies.getAll().some((cookie) =>
+    /^sb-.*(?:auth-token|access-token|refresh-token)/i.test(cookie.name)
+  );
+}
+
+function getErrorMessage(value: unknown) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value && "message" in value) {
+    return String((value as { message?: unknown }).message || "");
+  }
+  return String(value);
+}
+
+function isExpectedMissingSessionError(message: string) {
+  return /auth session missing/i.test(String(message || ""));
+}
+
+function isTransientAuthError(message: string) {
+  return TRANSIENT_AUTH_ERROR_REGEX.test(String(message || ""));
 }
 
 export async function middleware(request: NextRequest) {
@@ -85,20 +111,58 @@ export async function middleware(request: NextRequest) {
   });
 
   let user: any = null;
+  let authLookupErrorMessage = "";
+  let authLookupHadTransientFailure = false;
+
   try {
-    const { data, error } = await withTimeout(supabase.auth.getUser(), 2000, "auth.getUser");
+    const { data, error } = await withTimeout(supabase.auth.getUser(), 4200, "auth.getUser");
+    const errorMessage = getErrorMessage(error);
     if (error) {
-      const isExpectedMissingSession = /auth session missing/i.test(String(error.message || ""));
-      if (!isExpectedMissingSession) {
-        console.error("auth.getUser failed:", error.message);
+      authLookupErrorMessage = errorMessage;
+      if (!isExpectedMissingSessionError(errorMessage) && !isTransientAuthError(errorMessage)) {
+        console.error("auth.getUser failed:", errorMessage);
+      } else if (isTransientAuthError(errorMessage)) {
+        authLookupHadTransientFailure = true;
       }
     }
     user = data?.user ?? null;
-  } catch (error) {
-    console.error("auth.getUser crashed:", error);
+  } catch (error: unknown) {
+    authLookupErrorMessage = getErrorMessage(error);
+    if (isTransientAuthError(authLookupErrorMessage)) {
+      authLookupHadTransientFailure = true;
+    } else {
+      console.error("auth.getUser crashed:", error);
+    }
   }
 
   if (!user) {
+    try {
+      const { data, error } = await withTimeout(supabase.auth.getSession(), 3000, "auth.getSession");
+      const errorMessage = getErrorMessage(error);
+      if (errorMessage && !authLookupErrorMessage) {
+        authLookupErrorMessage = errorMessage;
+      }
+      if (errorMessage && isTransientAuthError(errorMessage)) {
+        authLookupHadTransientFailure = true;
+      }
+      user = data?.session?.user ?? null;
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      if (message && !authLookupErrorMessage) {
+        authLookupErrorMessage = message;
+      }
+      if (isTransientAuthError(message)) {
+        authLookupHadTransientFailure = true;
+      }
+    }
+  }
+
+  if (!user) {
+    const authCookiePresent = hasSupabaseAuthCookie(request);
+    if (authCookiePresent && authLookupHadTransientFailure) {
+      return supabaseResponse;
+    }
+
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     const redirectResponse = NextResponse.redirect(redirectUrl);

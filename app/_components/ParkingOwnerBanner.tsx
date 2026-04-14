@@ -81,18 +81,17 @@ export function ParkingOwnerBanner() {
   useEffect(() => {
     let isMounted = true;
 
-    const bootstrap = async () => {
+    const syncUser = async () => {
       const { user } = await resolveClientUser(supabase);
       if (!isMounted) return;
 
       setUserId(user?.id || "");
     };
 
-    void bootstrap();
+    void syncUser();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!isMounted) return;
-      setUserId(session?.user?.id || "");
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      void syncUser();
     });
 
     return () => {
@@ -234,6 +233,8 @@ export function ParkingOwnerBanner() {
 
     if (error) {
       setErrorMessage(error.message || "Unable to acknowledge this report.");
+    } else {
+      setReports((prev) => prev.filter((report) => report.id !== activeReport.id));
     }
 
     setIsResolving(false);

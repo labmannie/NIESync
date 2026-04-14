@@ -8,6 +8,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { MobileToast } from "@/components/MobileToast";
 import {
   normalizePhoneNumber,
   validateRequiredPhoneNumber,
@@ -41,6 +42,9 @@ export default function CompleteProfile() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [mobileToast, setMobileToast] = useState<{ kind: "error" | "success"; message: string } | null>(null);
+  const [isUserTypeLocked, setIsUserTypeLocked] = useState(false);
+  const [isUsnLocked, setIsUsnLocked] = useState(false);
 
   // Form State - Excluding email/password since Google Auth provided it
   const [formData, setFormData] = useState({
@@ -96,6 +100,9 @@ export default function CompleteProfile() {
       let hydratedForm = baseForm;
 
       if (existingProfile) {
+        setIsUserTypeLocked(Boolean(String(existingProfile.user_type || "").trim()));
+        setIsUsnLocked(Boolean(String(existingProfile.usn || "").trim()));
+
         const userType =
           existingProfile.user_type ||
           (existingProfile.role === "Faculty" ? "Faculty" : "Student");
@@ -127,6 +134,11 @@ export default function CompleteProfile() {
     hydrateExistingProfile();
   }, [router]);
 
+  useEffect(() => {
+    if (!error) return;
+    setMobileToast({ kind: "error", message: error });
+  }, [error]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     const nextValue = name === "vehicleNo" ? formatOwnerVehiclePlateInput(value) : value;
@@ -135,6 +147,7 @@ export default function CompleteProfile() {
   };
 
   const handleUserTypeChange = (userType: "Student" | "Faculty") => {
+    if (isUserTypeLocked) return;
     setFormData(prev => {
       if (userType === "Faculty") {
         return {
@@ -159,6 +172,7 @@ export default function CompleteProfile() {
   };
 
   const nextStep = () => {
+    setError("");
     if (step === 1) {
       if (!formData.userType || !formData.firstName || !formData.lastName || !formData.phone) {
         setError("Please fill all required fields.");
@@ -352,6 +366,12 @@ export default function CompleteProfile() {
 
   return (
     <main className="min-h-screen w-full bg-campus-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-accent-blue/30 p-4 pt-28">
+      <MobileToast
+        kind={mobileToast?.kind || "error"}
+        message={mobileToast?.message || ""}
+        open={Boolean(mobileToast?.message)}
+        onClose={() => setMobileToast(null)}
+      />
       
       {/* Abstract Backgrounds */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-5xl opacity-30 pointer-events-none">
@@ -390,7 +410,7 @@ export default function CompleteProfile() {
                 initial={{ opacity: 0, height: 0, marginBottom: 0 }}
                 animate={{ opacity: 1, height: "auto", marginBottom: 20 }}
                 exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-sm text-sm flex items-start gap-2"
+                className="mb-5 hidden items-start gap-2 rounded-sm border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400 md:flex"
               >
                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>{error}</span>
@@ -424,12 +444,13 @@ export default function CompleteProfile() {
                       {["Student", "Faculty"].map((type) => (
                         <div
                           key={type}
-                          onClick={() => handleUserTypeChange(type as "Student" | "Faculty")}
-                          className={`
-                            cursor-pointer border py-3 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
-                            ${formData.userType === type
-                              ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
-                              : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
+                           onClick={() => handleUserTypeChange(type as "Student" | "Faculty")}
+                           className={`
+                             border py-3 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
+                             ${isUserTypeLocked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}
+                             ${formData.userType === type
+                               ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
+                               : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
                             }
                           `}
                         >
@@ -466,8 +487,9 @@ export default function CompleteProfile() {
                           name="usn"
                           value={formData.usn}
                           onChange={handleChange}
+                          disabled={isUsnLocked}
                           placeholder="4NI20CS000"
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
+                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase disabled:opacity-65"
                         />
                         <p className="text-[10px] text-accent-amber mt-1 flex items-center gap-1 font-bold uppercase tracking-wider"><AlertCircle className="w-3 h-3" /> USN cannot be changed once entered. Please verify carefully.</p>
                       </div>

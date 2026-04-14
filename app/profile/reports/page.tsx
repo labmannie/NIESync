@@ -6,6 +6,11 @@ import { useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft, CheckCircle2, Download, Loader2, RotateCcw } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { MobileToast } from "@/components/MobileToast";
+import {
+  downloadParkingIncidentReportPdf,
+  downloadParkingTranscriptPdf,
+} from "@/lib/parkingReportPdf";
 import {
   getParkingIncidentPhotoUrlAction,
   reporterMarkUnresolvedAction,
@@ -65,7 +70,10 @@ function ProfileReportsArchivePageContent() {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [isReopening, setIsReopening] = useState(false);
+  const [isDownloadingIncidentReport, setIsDownloadingIncidentReport] = useState(false);
+  const [isDownloadingTranscriptReport, setIsDownloadingTranscriptReport] = useState(false);
   const [reportPhotoUrlById, setReportPhotoUrlById] = useState<Record<string, string>>({});
+  const [mobileToast, setMobileToast] = useState<{ kind: "error" | "info"; message: string } | null>(null);
 
   const reportIdFromQuery = searchParams.get("report") || "";
 
@@ -173,6 +181,12 @@ function ProfileReportsArchivePageContent() {
   }, [supabase, loadReports]);
 
   useEffect(() => {
+    const message = schemaError || loadError || actionError;
+    if (!message) return;
+    setMobileToast({ kind: "error", message });
+  }, [schemaError, loadError, actionError]);
+
+  useEffect(() => {
     if (!selectedReportId) {
       setMessages([]);
       return;
@@ -221,38 +235,79 @@ function ProfileReportsArchivePageContent() {
     };
   }, [selectedReport?.id, selectedReport?.photo_url, reportPhotoUrlById]);
 
-  const handleDownloadTranscript = () => {
-    if (!selectedReport || messages.length === 0) return;
-    const header = [
-      `Report ID: ${selectedReport.id}`,
-      `Plate: ${selectedReport.license_plate}`,
-      `Reporter Note: ${selectedReport.location_description}`,
-      `Status: ${selectedReport.status}`,
-      `Created: ${new Date(selectedReport.created_at).toLocaleString()}`,
-      `Resolved: ${selectedReport.resolved_at ? new Date(selectedReport.resolved_at).toLocaleString() : "N/A"}`,
-      "",
-      "Transcript",
-      "----------",
-    ];
+  const handleDownloadIncidentReport = async () => {
+    if (!selectedReport) return;
+    setActionError("");
+    setIsDownloadingIncidentReport(true);
 
-    const body = messages.map((message) => {
+    let incidentPhotoUrl = selectedReportPhotoUrl;
+    if (!incidentPhotoUrl && selectedReport.photo_url) {
+      const signedPhoto = await getParkingIncidentPhotoUrlAction(selectedReport.photo_url);
+      if (signedPhoto.ok && signedPhoto.url) {
+        incidentPhotoUrl = signedPhoto.url;
+      }
+    }
+
+    const pdfResult = await downloadParkingIncidentReportPdf({
+      reportId: selectedReport.id,
+      plate: selectedReport.license_plate,
+      location: selectedReport.location_description,
+      status: selectedReport.status,
+      createdAtIso: selectedReport.created_at,
+      resolvedAtIso: selectedReport.resolved_at,
+      generatedAtIso: new Date().toISOString(),
+      incidentPhotoUrl,
+      reporterNote: selectedReport.location_description,
+    });
+
+    setIsDownloadingIncidentReport(false);
+
+    if (!pdfResult.ok) {
+      setActionError(pdfResult.error || "Unable to download incident report PDF.");
+      return;
+    }
+
+    setMobileToast({ kind: "info", message: "Incident report downloaded." });
+  };
+
+  const handleDownloadTranscript = async () => {
+    if (!selectedReport) return;
+    setActionError("");
+    setIsDownloadingTranscriptReport(true);
+
+    let incidentPhotoUrl = selectedReportPhotoUrl;
+    if (!incidentPhotoUrl && selectedReport.photo_url) {
+      const signedPhoto = await getParkingIncidentPhotoUrlAction(selectedReport.photo_url);
+      if (signedPhoto.ok && signedPhoto.url) {
+        incidentPhotoUrl = signedPhoto.url;
+      }
+    }
+
+    const transcriptLines = messages.map((message) => {
       const label = getRoleLabel(message, Boolean(isReporter), Boolean(isOwner));
       return `[${new Date(message.created_at).toLocaleString()}] ${label}: ${message.message}`;
     });
 
-    const content = [...header, ...body].join("\n");
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const filePlate = selectedReport.license_plate.replace(/[^A-Z0-9]+/gi, "_");
-    const fileName = `parking-archive-${filePlate || "report"}-${selectedReport.id}.txt`;
+    const pdfResult = await downloadParkingTranscriptPdf({
+      reportId: selectedReport.id,
+      plate: selectedReport.license_plate,
+      location: selectedReport.location_description,
+      status: selectedReport.status,
+      createdAtIso: selectedReport.created_at,
+      resolvedAtIso: selectedReport.resolved_at,
+      generatedAtIso: new Date().toISOString(),
+      incidentPhotoUrl,
+      transcriptLines,
+    });
 
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    setIsDownloadingTranscriptReport(false);
+
+    if (!pdfResult.ok) {
+      setActionError(pdfResult.error || "Unable to download transcript PDF.");
+      return;
+    }
+
+    setMobileToast({ kind: "info", message: "Chat transcript downloaded." });
   };
 
   const handleReopenResolvedReport = async () => {
@@ -274,21 +329,30 @@ function ProfileReportsArchivePageContent() {
   };
 
   return (
-    <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+    <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
+      <MobileToast
+        kind={mobileToast?.kind || "info"}
+        message={mobileToast?.message || ""}
+        open={Boolean(mobileToast?.message)}
+        onClose={() => setMobileToast(null)}
+      />
       <div className="mx-auto w-full max-w-7xl">
-        <header className="mb-6 rounded-3xl border border-white/10 bg-white/[0.03] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.45)] md:p-7">
+        <header className="mb-6 overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(37,99,235,0.14)_0%,rgba(255,176,0,0.12)_48%,rgba(255,255,255,0.04)_100%)] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.5)] md:p-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/70">
+                Reporter Archive
+              </p>
               <h1 className="mt-1 text-2xl font-black tracking-tight md:text-4xl">
                 Parking Report History
               </h1>
-              <p className="mt-2 max-w-3xl text-sm text-text-secondary md:text-base">
+              <p className="mt-2 max-w-3xl text-sm text-white/75 md:text-base">
                 Archived records only (resolved and unmatched). Live reports and live chat stay in Parking Patrol.
               </p>
             </div>
             <Link
               href="/parking-patrol"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] transition-colors hover:bg-white/20"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/45 bg-accent-blue/20 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-accent-blue/30"
             >
               <ArrowLeft className="h-4 w-4" />
               Back To Live Patrol
@@ -297,25 +361,25 @@ function ProfileReportsArchivePageContent() {
         </header>
 
         {schemaError ? (
-          <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div className="mb-6 hidden rounded-2xl border border-red-500/40 bg-red-500/12 px-4 py-3 text-sm text-red-200 md:block">
             {schemaError}
           </div>
         ) : null}
         {loadError ? (
-          <div className="mb-6 inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+          <div className="mb-6 hidden items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/12 px-3 py-2 text-xs text-red-200 md:inline-flex">
             <AlertCircle className="h-3.5 w-3.5" />
             {loadError}
           </div>
         ) : null}
         {actionError ? (
-          <div className="mb-6 inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+          <div className="mb-6 hidden items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/12 px-3 py-2 text-xs text-red-200 md:inline-flex">
             <AlertCircle className="h-3.5 w-3.5" />
             {actionError}
           </div>
         ) : null}
 
         <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
-          <aside className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 md:p-5">
+          <aside className="rounded-[26px] border border-white/10 bg-black/35 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm md:p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-xs font-black uppercase tracking-[0.2em] text-text-secondary">
                 Old Reports
@@ -327,7 +391,7 @@ function ProfileReportsArchivePageContent() {
                 Array.from({ length: 4 }).map((_, index) => (
                   <div
                     key={`resolved-report-skeleton-${index}`}
-                    className="animate-pulse rounded-xl border border-white/10 bg-black/30 px-3 py-3"
+                    className="animate-pulse rounded-2xl border border-white/10 bg-black/30 px-3 py-3"
                   >
                     <div className="h-4 w-2/5 rounded bg-white/10" />
                     <div className="mt-2 h-3 w-4/5 rounded bg-white/10" />
@@ -335,7 +399,7 @@ function ProfileReportsArchivePageContent() {
                   </div>
                 ))
               ) : reports.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-white/10 px-4 py-4 text-sm text-text-secondary">
+                <p className="rounded-2xl border border-dashed border-white/10 px-4 py-4 text-sm text-text-secondary">
                   No archived reports yet.
                 </p>
               ) : (
@@ -344,10 +408,10 @@ function ProfileReportsArchivePageContent() {
                     key={report.id}
                     type="button"
                     onClick={() => setSelectedReportId(report.id)}
-                    className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                    className={`w-full rounded-2xl border px-3 py-3 text-left transition-colors ${
                       selectedReportId === report.id
-                        ? "border-emerald-400/40 bg-emerald-500/15"
-                        : "border-white/10 bg-black/30 hover:border-white/25"
+                        ? "border-accent-blue/50 bg-accent-blue/15 shadow-[0_10px_28px_rgba(37,99,235,0.2)]"
+                        : "border-white/10 bg-black/35 hover:border-white/25"
                     }`}
                   >
                     <div className="mb-2 flex items-start justify-between gap-2">
@@ -359,7 +423,7 @@ function ProfileReportsArchivePageContent() {
                           Resolved
                         </span>
                       ) : (
-                        <span className="rounded-full border border-slate-400/35 bg-slate-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-slate-200">
+                        <span className="rounded-full border border-amber-400/35 bg-amber-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-amber-200">
                           Unmatched
                         </span>
                       )}
@@ -374,18 +438,18 @@ function ProfileReportsArchivePageContent() {
             </div>
           </aside>
 
-          <section className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 md:p-6">
+          <section className="rounded-[26px] border border-white/10 bg-black/35 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.45)] backdrop-blur-sm md:p-6">
             {!selectedReport ? (
-              <p className="rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-text-secondary">
+              <p className="rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-text-secondary">
                 Select an archived report to view transcript history.
               </p>
             ) : (
               <div className="space-y-4">
                 <div
-                  className={`rounded-2xl p-4 ${
+                  className={`rounded-[22px] p-4 ${
                     selectedReport.status === "resolved"
-                      ? "border border-emerald-400/35 bg-emerald-500/10"
-                      : "border border-slate-400/35 bg-slate-500/10"
+                      ? "border border-emerald-400/35 bg-emerald-500/12"
+                      : "border border-amber-400/35 bg-amber-500/12"
                   }`}
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -408,16 +472,16 @@ function ProfileReportsArchivePageContent() {
                         Finished
                       </span>
                     ) : (
-                      <span className="inline-flex items-center rounded-full border border-slate-300/30 px-3 py-1 text-[11px] text-slate-100">
+                      <span className="inline-flex items-center rounded-full border border-amber-300/30 px-3 py-1 text-[11px] text-amber-100">
                         Unmatched
                       </span>
                     )}
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                <div className="rounded-[22px] border border-white/10 bg-black/35 p-4">
                   {selectedReportPhotoUrl ? (
-                    <div className="mb-4 overflow-hidden rounded-xl border border-white/10">
+                    <div className="mb-4 overflow-hidden rounded-2xl border border-white/10">
                       <img
                         src={selectedReportPhotoUrl}
                         alt={`Incident photo for ${selectedReport.license_plate}`}
@@ -427,14 +491,14 @@ function ProfileReportsArchivePageContent() {
                   ) : null}
                   <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
                     {messages.length === 0 ? (
-                      <p className="rounded-lg border border-dashed border-white/10 px-3 py-4 text-xs text-text-secondary">
+                      <p className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-xs text-text-secondary">
                         No transcript messages stored for this report.
                       </p>
                     ) : (
                       messages.map((message) => (
                         <div
                           key={message.id}
-                          className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2"
+                          className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-text-secondary">
@@ -456,21 +520,40 @@ function ProfileReportsArchivePageContent() {
                         type="button"
                         onClick={handleReopenResolvedReport}
                         disabled={isReopening}
-                        className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-amber-400/35 bg-amber-500/15 px-3 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-100 transition-colors hover:bg-amber-500/20 disabled:opacity-60"
+                        className="mb-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-amber-400/35 bg-amber-500/15 px-3 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-100 transition-colors hover:bg-amber-500/20 disabled:opacity-60"
                       >
                         {isReopening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
                         {isReopening ? "Reopening..." : "Mark Unresolved (Reopen)"}
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={handleDownloadTranscript}
-                      disabled={messages.length === 0}
-                      className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition-colors hover:bg-white/20 disabled:opacity-60"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Download transcript
-                    </button>
+                    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                      <button
+                        type="button"
+                        onClick={handleDownloadIncidentReport}
+                        disabled={isDownloadingIncidentReport}
+                        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-accent-blue/45 bg-accent-blue/20 px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-accent-blue/28 disabled:opacity-60 sm:w-auto"
+                      >
+                        {isDownloadingIncidentReport ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" />
+                        )}
+                        {isDownloadingIncidentReport ? "Preparing incident report..." : "Download incident report"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDownloadTranscript}
+                        disabled={isDownloadingTranscriptReport}
+                        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-amber-400/45 bg-amber-500/15 px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-100 transition-colors hover:bg-amber-500/22 disabled:opacity-60 sm:w-auto"
+                      >
+                        {isDownloadingTranscriptReport ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" />
+                        )}
+                        {isDownloadingTranscriptReport ? "Preparing transcript..." : "Download chat transcript"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -486,7 +569,7 @@ export default function ProfileReportsPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen w-full bg-campus-black px-4 pb-16 pt-32 text-white md:px-8">
+        <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
           <div className="mx-auto w-full max-w-7xl animate-pulse space-y-6">
             <div className="h-28 rounded-3xl border border-white/10 bg-white/[0.03]" />
             <div className="grid gap-6 xl:grid-cols-[360px_1fr]">

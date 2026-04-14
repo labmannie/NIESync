@@ -326,6 +326,8 @@ function ParkingPatrolPageContent() {
   const [unmatchedReport, setUnmatchedReport] = useState<UnmatchedReportSnapshot | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [ocrDialogOpen, setOcrDialogOpen] = useState(false);
+  const [pendingOcrFile, setPendingOcrFile] = useState<File | null>(null);
   const [threadDraft, setThreadDraft] = useState("");
   const [threadActionError, setThreadActionError] = useState("");
   const [isSendingMessage, setIsSendingMessage] = useState(false);
@@ -345,6 +347,7 @@ function ParkingPatrolPageContent() {
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<HTMLInputElement | null>(null);
   const escalationSyncInFlightRef = useRef(false);
   const escalatedReportsRef = useRef<Set<string>>(new Set());
 
@@ -825,7 +828,10 @@ function ParkingPatrolPageContent() {
       const previewUrl = URL.createObjectURL(compressedFile);
       setPhotoFile(compressedFile);
       setPhotoPreview(previewUrl);
-      await runOcr(compressedFile);
+
+      // Show OCR choice dialog instead of auto-calling OCR
+      setPendingOcrFile(compressedFile);
+      setOcrDialogOpen(true);
     } catch {
       setSubmitError("Unable to process this photo. Please try a different image.");
     }
@@ -1000,12 +1006,16 @@ function ParkingPatrolPageContent() {
       setMessages((prev) => prev.filter((message) => message.id !== tempMessageId));
       setThreadDraft(draftMessage);
       setThreadActionError(response.error || "Unable to send message.");
+      requestAnimationFrame(() => chatInputRef.current?.focus());
       return;
     }
 
     setMessages((prev) => prev.filter((message) => message.id !== tempMessageId));
     await loadMessages(selectedReport.id);
     if (userId) await loadReports(userId);
+
+    // Re-focus the chat input after send so user can keep typing
+    requestAnimationFrame(() => chatInputRef.current?.focus());
   };
 
   const handleOwnerAcknowledge = async () => {
@@ -1673,6 +1683,7 @@ function ParkingPatrolPageContent() {
                   <div className="sticky bottom-0 border-t border-white/[0.06] bg-[#0a0a0a] p-3">
                     <div className="flex gap-2">
                     <input
+                      ref={chatInputRef}
                       type="text"
                       value={threadDraft}
                       onChange={(event) => setThreadDraft(event.target.value)}
@@ -1684,6 +1695,7 @@ function ParkingPatrolPageContent() {
                       }}
                       placeholder="Type a message..."
                       disabled={isChatReadOnly || isSendingMessage}
+                      autoFocus
                       className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.04] px-4 py-3 text-sm text-white outline-none placeholder:text-[#444] focus:border-[#f5a623]/40 disabled:opacity-60"
                     />
                     <button
@@ -1731,6 +1743,76 @@ function ParkingPatrolPageContent() {
             </div>
           </section>
 
+
+          {ocrDialogOpen ? (
+            <div className="fixed inset-0 z-[130] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center">
+              <div className="w-full max-w-md animate-[slideUp_0.25s_ease-out] rounded-2xl border border-white/[0.08] bg-[#111] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.55)]">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[#f5a623]/25 bg-[#f5a623]/10">
+                    <Camera className="h-5 w-5 text-[#f5a623]" />
+                  </span>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#888]">Photo Uploaded</p>
+                    <h3 className="mt-0.5 text-base font-black tracking-tight text-white">What would you like to do?</h3>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm leading-relaxed text-[#aaa]">
+                  Choose how to use this photo for your incident report.
+                </p>
+                <div className="mt-4 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOcrDialogOpen(false);
+                      if (pendingOcrFile) {
+                        void runOcr(pendingOcrFile);
+                      }
+                      setPendingOcrFile(null);
+                    }}
+                    className="flex h-14 w-full items-center gap-3 rounded-xl border border-[#f5a623]/20 bg-[#f5a623]/10 px-4 text-left transition-transform active:scale-[0.98]"
+                  >
+                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f5a623]/20">
+                      <ShieldAlert className="h-4 w-4 text-[#f5a623]" />
+                    </span>
+                    <span>
+                      <span className="block text-sm font-bold text-[#f5a623]">Extract Number Plate</span>
+                      <span className="block text-[11px] text-[#888]">Auto-detect plate via OCR</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOcrDialogOpen(false);
+                      setPendingOcrFile(null);
+                      setSubmitMessage("Photo added as incident evidence. Enter plate manually if needed.");
+                    }}
+                    className="flex h-14 w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 text-left transition-transform active:scale-[0.98]"
+                  >
+                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.06]">
+                      <Camera className="h-4 w-4 text-[#aaa]" />
+                    </span>
+                    <span>
+                      <span className="block text-sm font-bold text-white">Just Incident Photo</span>
+                      <span className="block text-[11px] text-[#888]">Use as evidence only, skip OCR</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOcrDialogOpen(false);
+                      setPendingOcrFile(null);
+                      if (photoPreview) URL.revokeObjectURL(photoPreview);
+                      setPhotoFile(null);
+                      setPhotoPreview("");
+                    }}
+                    className="h-11 w-full rounded-xl text-sm font-semibold text-[#666] transition-colors hover:text-[#aaa]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {cancelConfirmOpen ? (
             <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/65 p-4 sm:items-center">
               <div className="w-full max-w-md rounded-2xl border border-white/[0.08] bg-[#111] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.55)]">

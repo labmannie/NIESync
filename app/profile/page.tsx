@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
@@ -16,6 +16,7 @@ import {
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
 import { MobileToast } from "@/components/MobileToast";
+import ImageCropper from "@/components/ImageCropper";
 import { normalizePhoneNumber, validateRequiredPhoneNumber } from "@/lib/phone";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
@@ -155,6 +156,8 @@ export default function ProfilePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [showCropper, setShowCropper] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
   const [error, setError] = useState("");
@@ -229,6 +232,25 @@ export default function ProfilePage() {
     setMobileToast({ kind: "success", message: success });
   }, [success]);
 
+  const handleFileSelect = (file: File) => {
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Profile photo must be under 5MB.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setError("Use JPG, PNG, or WEBP image format.");
+      return;
+    }
+    setCropFile(file);
+    setShowCropper(true);
+  };
+
+  const handleCroppedUpload = async (blob: Blob) => {
+    const file = new File([blob], "avatar.png", { type: "image/png" });
+    setShowCropper(false);
+    setCropFile(null);
+    await handleAvatarUpload(file);
+  };
   const handleAvatarUpload = async (file: File) => {
     if (!userId) return;
 
@@ -351,6 +373,17 @@ export default function ProfilePage() {
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
+      {showCropper && cropFile ? (
+        <ImageCropper
+          file={cropFile}
+          onCrop={(blob) => void handleCroppedUpload(blob)}
+          onCancel={() => {
+            setShowCropper(false);
+            setCropFile(null);
+          }}
+          isUploading={isUploadingAvatar}
+        />
+      ) : null}
       <MobileToast
         kind={mobileToast?.kind || "info"}
         message={mobileToast?.message || ""}
@@ -387,7 +420,7 @@ export default function ProfilePage() {
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file) {
-                      void handleAvatarUpload(file);
+                      handleFileSelect(file);
                     }
                     event.currentTarget.value = "";
                   }}

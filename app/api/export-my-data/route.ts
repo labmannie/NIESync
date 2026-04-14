@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient as createServerClient } from "@/utils/supabase/server";
 import nodemailer from "nodemailer";
@@ -7,7 +7,7 @@ import path from "path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /* ── Brand palette (matches existing brand system) ── */
 const BRAND = {
@@ -1091,9 +1091,9 @@ function buildDataExportEmailHtml(
   `.trim();
 }
 
-/* ═══════════════════════════════════════════════════════
-   MAILER
-   ═══════════════════════════════════════════════════════ */
+// ══════════════════════════════════════════════════════
+//   MAILER
+// ======================================================
 
 function getDataExportTransporter() {
   const smtpUser = String(process.env.GMAIL_USER || "").trim();
@@ -1135,10 +1135,6 @@ function getDataExportTransporter() {
   });
 }
 
-/* ═══════════════════════════════════════════════════════
-   API HANDLER
-   ═══════════════════════════════════════════════════════ */
-
 export async function POST(request: NextRequest) {
   try {
     // Authenticate the user via session cookies
@@ -1164,6 +1160,38 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Kick off the heavy work (data fetch → PDF gen → 1-min wait → email)
+    // as a detached background task so we can respond to the client immediately.
+    after(async () => {
+      await processAndSendExport({ authUser, userId, userEmail });
+    });
+
+    // Respond immediately — user doesn't wait
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (error) {
+    console.error("Data export error:", error);
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to process data export.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+async function processAndSendExport({
+  authUser,
+  userId,
+  userEmail,
+}: {
+  authUser: any;
+  userId: string;
+  userEmail: string;
+}) {
+  try {
     // Use admin client to read all data
     const admin = createAdminClient();
 
@@ -1244,6 +1272,9 @@ export async function POST(request: NextRequest) {
       generateAuthHistoryPdf(sessions, authUser, userName, generatedAt),
     ]);
 
+    // Wait 1 minute before sending the email
+    // No artificial delay — send immediately
+
     // Prepare email
     const transporter = getDataExportTransporter();
     const smtpUser = String(process.env.GMAIL_USER || "").trim();
@@ -1279,9 +1310,6 @@ export async function POST(request: NextRequest) {
 
     const emailHtml = buildDataExportEmailHtml(userName, hasLogo);
 
-    // Wait 1 minute before sending, so the user sees the "processing" feel
-    await new Promise((resolve) => setTimeout(resolve, 60_000));
-
     await transporter.sendMail({
       from: `NIE Campus Sync <${smtpUser}>`,
       to: userEmail,
@@ -1289,18 +1317,7 @@ export async function POST(request: NextRequest) {
       html: emailHtml,
       attachments,
     });
-
-    return NextResponse.json({ ok: true }, { status: 200 });
-  } catch (error) {
-    console.error("Data export error:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to process data export.",
-      },
-      { status: 500 }
-    );
+  } catch (bgError) {
+    console.error("Background data export failed:", bgError);
   }
 }

@@ -17,6 +17,7 @@ import {
   PenSquare,
   Search,
   Share2,
+  Trash2,
   UserRound,
   X,
 } from "lucide-react";
@@ -73,6 +74,7 @@ type ForumProfile = {
 
 type DraftImage = { file: File; preview: string };
 type ShareDialogState = { postId: string; title: string };
+type DeleteDialogState = { postId: string; title: string };
 
 const BUCKET = "forum-images";
 const MAX_IMAGES = 6;
@@ -271,6 +273,8 @@ export default function ForumPage() {
   const [relationFilter, setRelationFilter] = useState<RelationFilter>("all");
   const [shareDialog, setShareDialog] = useState<ShareDialogState | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
+  const [deletingPostId, setDeletingPostId] = useState("");
 
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerMode, setComposerMode] = useState<"create" | "edit">("create");
@@ -680,7 +684,7 @@ export default function ForumPage() {
   }, [supabase, activePostId, userId, loadComments]);
 
   useEffect(() => {
-    if (!shareDialog) return;
+    if (!shareDialog && !deleteDialog) return;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setShareDialog(null);
@@ -689,10 +693,13 @@ export default function ForumPage() {
         window.clearTimeout(shareCopiedTimer.current);
         shareCopiedTimer.current = null;
       }
+      if (!deletingPostId) {
+        setDeleteDialog(null);
+      }
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [shareDialog]);
+  }, [deleteDialog, deletingPostId, shareDialog]);
 
   useEffect(() => {
     return () => {
@@ -1008,8 +1015,19 @@ export default function ForumPage() {
   }, []);
 
   const openShareDialog = (postId: string, title: string) => {
+    setDeleteDialog(null);
     setShareDialog({ postId, title: clean(title) });
     setShareCopied(false);
+  };
+
+  const closeDeleteDialog = useCallback(() => {
+    if (deletingPostId) return;
+    setDeleteDialog(null);
+  }, [deletingPostId]);
+
+  const openDeleteDialog = (post: ForumPost) => {
+    closeShareDialog();
+    setDeleteDialog({ postId: post.id, title: clean(post.title) });
   };
 
   const markShareCopied = () => {
@@ -1075,6 +1093,94 @@ export default function ForumPage() {
     window.open(href, "_blank", "noopener,noreferrer");
     setFeedNotice("Share window opened.");
     closeShareDialog();
+  };
+
+  const confirmDeletePost = async () => {
+    if (!userId || !deleteDialog || deletingPostId) return;
+    const postId = deleteDialog.postId;
+    setDeletingPostId(postId);
+    setFeedError("");
+    setFeedNotice("");
+
+    try {
+      const { data: imageRows, error: imageError } = await supabase
+        .from("forum_post_images")
+        .select("storage_path")
+        .eq("post_id", postId);
+      if (imageError) throw new Error(imageError.message || "Unable to prepare post deletion.");
+
+      const imagePaths = ((imageRows || []) as Array<{ storage_path: string }>)
+        .map((row) => String(row.storage_path || "").trim())
+        .filter(Boolean);
+
+      const { data: deletedPost, error: deleteError } = await supabase
+        .from("forum_posts")
+        .delete()
+        .eq("id", postId)
+        .eq("author_id", userId)
+        .select("id")
+        .maybeSingle();
+      if (deleteError) throw new Error(deleteError.message || "Unable to delete this post.");
+      if (!deletedPost?.id) throw new Error("Post already removed or you don't have permission to delete it.");
+
+      let imageCleanupFailed = false;
+      if (imagePaths.length) {
+        const { error: storageError } = await supabase.storage.from(BUCKET).remove(imagePaths);
+        imageCleanupFailed = Boolean(storageError);
+      }
+
+      if (editingPost?.id === postId) {
+        closeComposer();
+      }
+
+      if (activePostId === postId) {
+        setActivePostId("");
+        setComments([]);
+        setCommentProfilesById({});
+        setCommentVotes({});
+        setCommentDraft("");
+        setCommentAnonymous(false);
+        setReplyToId(null);
+        setEditingCommentId("");
+      }
+
+      setDeleteDialog(null);
+      setPosts((current) => current.filter((post) => post.id !== postId));
+      setImagesByPostId((current) => {
+        if (!current[postId]) return current;
+        const next = { ...current };
+        delete next[postId];
+        return next;
+      });
+      setVotesByPostId((current) => {
+        if (!(postId in current)) return current;
+        const next = { ...current };
+        delete next[postId];
+        return next;
+      });
+      setLikedIds((current) => {
+        if (!current.has(postId)) return current;
+        const next = new Set(current);
+        next.delete(postId);
+        return next;
+      });
+
+      if (detailMode && routePostId === postId) {
+        router.replace("/forum", { scroll: false });
+      } else {
+        await loadFeed(userId, false);
+      }
+
+      setFeedNotice(
+        imageCleanupFailed
+          ? "Post deleted. Some image files could not be cleaned up."
+          : "Post deleted successfully."
+      );
+    } catch (e: any) {
+      setFeedError(String(e?.message || "Unable to delete this post."));
+    } finally {
+      setDeletingPostId("");
+    }
   };
 
   const toggleDiscussion = async (postId: string) => {
@@ -1627,15 +1733,31 @@ export default function ForumPage() {
                           <Share2 className="h-3.5 w-3.5" />
                         </button>
                         {own ? (
-                          <button
-                            type="button"
-                            title="Edit post"
-                            aria-label="Edit post"
-                            onClick={() => openComposer(post)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-accent-blue/28 bg-accent-blue/12 text-white/80 hover:bg-accent-blue/25"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              title="Edit post"
+                              aria-label="Edit post"
+                              onClick={() => openComposer(post)}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-accent-blue/28 bg-accent-blue/12 text-white/80 hover:bg-accent-blue/25"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Delete post"
+                              aria-label="Delete post"
+                              onClick={() => openDeleteDialog(post)}
+                              disabled={deletingPostId === post.id}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-red-400/45 bg-red-500/12 text-red-200 hover:bg-red-500/22 disabled:cursor-not-allowed disabled:opacity-55"
+                            >
+                              {deletingPostId === post.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </>
                         ) : null}
                       </div>
                     </div>
@@ -1797,6 +1919,64 @@ export default function ForumPage() {
             </aside>
           ) : null}
         </section>
+
+        {deleteDialog ? (
+          <div className="fixed inset-0 z-[142] flex items-center justify-center px-4">
+            <button
+              type="button"
+              onClick={closeDeleteDialog}
+              aria-label="Close delete confirmation"
+              className="absolute inset-0 bg-black/82 backdrop-blur-[2px]"
+              disabled={Boolean(deletingPostId)}
+            />
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-label="Delete post confirmation"
+              className="relative z-10 w-full max-w-md rounded-2xl border border-red-400/35 bg-[linear-gradient(150deg,rgba(28,10,10,0.96)_0%,rgba(24,12,20,0.93)_52%,rgba(220,38,38,0.16)_100%)] p-4 shadow-[0_20px_70px_rgba(0,0,0,0.7)]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-red-100">Delete Post</p>
+                  <p className="mt-1 truncate text-xs text-red-100/70">{deleteDialog.title || "Untitled post"}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeDeleteDialog}
+                  disabled={Boolean(deletingPostId)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-300/35 bg-red-500/12 text-red-100 hover:bg-red-500/22 disabled:opacity-60"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <p className="mt-4 rounded-xl border border-red-300/25 bg-black/30 px-3 py-2 text-sm text-red-100/85">
+                This action is permanent. The post, comments, likes, and votes will be removed for everyone.
+              </p>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={closeDeleteDialog}
+                  disabled={Boolean(deletingPostId)}
+                  className="rounded-xl border border-white/20 bg-white/[0.06] px-3 py-2 text-xs font-black uppercase tracking-[0.11em] text-white/85 hover:bg-white/[0.1] disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmDeletePost()}
+                  disabled={Boolean(deletingPostId)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-300/45 bg-red-500/25 px-3 py-2 text-xs font-black uppercase tracking-[0.11em] text-red-50 hover:bg-red-500/35 disabled:opacity-60"
+                >
+                  {deletingPostId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  Delete Post
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
 
         {shareDialog ? (
           <div className="fixed inset-0 z-[140] flex items-center justify-center px-4">

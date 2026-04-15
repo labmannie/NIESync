@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
-import { Rubik } from "next/font/google";
+import { Rubik, Geist } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { SiteFooter } from "@/app/_components/SiteFooter";
 import { ParkingOwnerBanner } from "@/app/_components/ParkingOwnerBanner";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const rubik = Rubik({ subsets: ["latin"] });
 
@@ -18,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" className={cn("dark", "font-sans", geist.variable)} suppressHydrationWarning>
       <body className={rubik.className} suppressHydrationWarning>
         <Navbar />
         <ParkingOwnerBanner />

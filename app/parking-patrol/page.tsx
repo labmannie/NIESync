@@ -103,6 +103,9 @@ const LOCATION_OPTIONS = [...COMMON_LOCATION_ZONES, "Other"];
 const CHAT_WINDOW_SECONDS = 60;
 const EMAIL_TO_CALL_SECONDS = 60;
 const LOCATION_DESCRIPTION_MAX_LENGTH = 180;
+const AUTH_RETRY_DELAY_MS = 900;
+const MAX_AUTH_RETRY_ATTEMPTS = 4;
+const TRANSIENT_AUTH_ERROR_REGEX = /timed out|abort|network|fetch/i;
 
 const STATUS_THEME: Record<ParkingStatus, string> = {
   pending: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
@@ -113,6 +116,10 @@ const STATUS_THEME: Record<ParkingStatus, string> = {
   unmatched: "bg-red-500/10 text-red-400 border border-red-500/20",
   expired: "bg-red-500/10 text-red-400 border border-red-500/20",
 };
+
+function isTransientParkingAuthError(message: string) {
+  return TRANSIENT_AUTH_ERROR_REGEX.test(String(message || ""));
+}
 
 async function compressImage(file: File): Promise<Blob> {
   return new Promise((resolve) => {
@@ -538,6 +545,7 @@ function ParkingPatrolPageContent() {
 
   useEffect(() => {
     let active = true;
+    let authRetryTimer: number | null = null;
 
     const applySessionState = async (nextUserId: string, showLoader = false) => {
       if (!active) return;
@@ -546,10 +554,28 @@ function ParkingPatrolPageContent() {
       await loadReports(nextUserId, showLoader);
     };
 
-    const bootstrap = async () => {
+    const clearAuthRetryTimer = () => {
+      if (authRetryTimer) {
+        window.clearTimeout(authRetryTimer);
+        authRetryTimer = null;
+      }
+    };
+
+    const bootstrap = async (attempt = 0) => {
       try {
-        const { user } = await resolveClientUser(supabase);
+        const { user, errorMessage } = await resolveClientUser(supabase);
         const resolvedUserId = user?.id || "";
+
+        if (!resolvedUserId && isTransientParkingAuthError(errorMessage) && attempt < MAX_AUTH_RETRY_ATTEMPTS) {
+          clearAuthRetryTimer();
+          authRetryTimer = window.setTimeout(() => {
+            if (!active) return;
+            void bootstrap(attempt + 1);
+          }, AUTH_RETRY_DELAY_MS * (attempt + 1));
+          return;
+        }
+
+        clearAuthRetryTimer();
         await applySessionState(resolvedUserId, true);
       } catch (error) {
         console.error("Parking patrol auth bootstrap failed:", error);
@@ -559,14 +585,33 @@ function ParkingPatrolPageContent() {
 
     void bootstrap();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async () => {
-      const { user } = await resolveClientUser(supabase);
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const sessionUserId = String(session?.user?.id || "");
+      if (sessionUserId) {
+        clearAuthRetryTimer();
+        await applySessionState(sessionUserId, false);
+        return;
+      }
+
+      const { user, errorMessage } = await resolveClientUser(supabase);
       const resolvedUserId = user?.id || "";
+
+      if (!resolvedUserId && isTransientParkingAuthError(errorMessage)) {
+        clearAuthRetryTimer();
+        authRetryTimer = window.setTimeout(() => {
+          if (!active) return;
+          void bootstrap(0);
+        }, AUTH_RETRY_DELAY_MS);
+        return;
+      }
+
+      clearAuthRetryTimer();
       await applySessionState(resolvedUserId, false);
     });
 
     return () => {
       active = false;
+      clearAuthRetryTimer();
       authListener.subscription.unsubscribe();
     };
   }, [supabase, loadReports]);
@@ -1427,7 +1472,7 @@ function ParkingPatrolPageContent() {
                 <button
                   type="button"
                   onClick={handleSubmitReport}
-                  disabled={isSubmitting || !isLoggedIn}
+                  disabled={isSubmitting || (isLoadingReports && !userId)}
                   className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#f5a623] text-sm font-bold text-black transition-transform active:scale-95 disabled:opacity-60"
                 >
                   {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}

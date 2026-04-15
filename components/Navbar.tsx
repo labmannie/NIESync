@@ -304,7 +304,7 @@ export function Navbar() {
   return (
     <>
       <nav
-        className={`fixed left-0 right-0 top-0 z-[100] flex w-full items-center justify-between px-6 transition-all duration-300 md:px-16 ${
+        className={`fixed left-0 right-0 top-0 z-[100] flex w-full items-center justify-between px-4 transition-all duration-300 sm:px-6 lg:px-10 xl:px-16 ${
           scrolled
             ? "border-b border-white/10 bg-campus-black/85 py-5 shadow-lg backdrop-blur-md"
             : "bg-transparent py-8"
@@ -316,12 +316,12 @@ export function Navbar() {
             alt="NIE Sync Logo"
             width={40}
             height={40}
-            className="h-9 w-9 object-contain drop-shadow-[0_0_6px_rgba(255,255,255,0.3)] transition-transform duration-300 group-hover:scale-110"
+            className="h-9 w-9 rounded-lg object-cover transition-transform duration-300 group-hover:scale-110"
           />
           <span className="text-2xl font-extrabold tracking-wide">NIE Sync</span>
         </Link>
 
-        <div className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-10 md:flex">
+        <div className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 xl:flex">
           {navLinks.map((link) => (
             <Link
               key={link.name}
@@ -335,7 +335,7 @@ export function Navbar() {
           ))}
         </div>
 
-        <div className="z-50 hidden items-center gap-4 md:flex">
+        <div className="z-50 hidden items-center gap-4 xl:flex">
           {mounted && !isAuthenticated ? (
             <>
               <Link
@@ -365,7 +365,7 @@ export function Navbar() {
                     initials
                   )}
                 </span>
-                <span className="hidden text-left xl:block">
+                <span className="hidden text-left 2xl:block">
                   <span className="block max-w-[180px] truncate text-xs font-bold uppercase tracking-[0.12em] text-white">
                     {displayName}
                   </span>
@@ -424,7 +424,7 @@ export function Navbar() {
         </div>
 
         <button
-          className="relative z-[110] rounded-full p-2 text-white transition-colors hover:bg-white/10 md:hidden"
+          className="relative z-[110] rounded-full p-2 text-white transition-colors hover:bg-white/10 xl:hidden"
           onClick={() => setIsMobileMenuOpen((value) => !value)}
           aria-label="Toggle Menu"
         >

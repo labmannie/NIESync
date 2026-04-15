@@ -401,7 +401,7 @@ async function generateProfileSummaryPdf(
     "Complete profile and activity summary prepared upon your request. This document is confidential.",
     userName,
     generatedAt,
-    "PDF 1 OF 3"
+    "PDF 1 OF 4"
   );
 
   y = drawSectionHeading(doc, "Profile Summary", y, margin, contentWidth);
@@ -560,7 +560,7 @@ async function generateTranscriptsPdf(
     "Complete conversation logs from all your parking incident reports, exported for your records.",
     userName,
     generatedAt,
-    "PDF 2 OF 3"
+    "PDF 2 OF 4"
   );
 
   if (parkingReports.length === 0) {
@@ -715,7 +715,7 @@ async function generateAuthHistoryPdf(
     "Complete login and session history for your NIE Sync account. Includes all active and expired sessions.",
     userName,
     generatedAt,
-    "PDF 3 OF 3"
+    "PDF 3 OF 4"
   );
 
   // Account info
@@ -934,6 +934,131 @@ async function generateAuthHistoryPdf(
    EMAIL TEMPLATE
    ═══════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════
+   PDF 4: Forum Posts Archive
+   ═══════════════════════════════════════════════════════════════ */
+
+async function generateForumPostsPdf(
+  forumPosts: any[],
+  userName: string,
+  generatedAt: string
+) {
+  const doc = await createDoc();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  const contentWidth = pageWidth - margin * 2;
+
+  let y = drawDataExportHeader(
+    doc,
+    "Forum Posts Archive",
+    "A complete archive of every forum post created by your account.",
+    userName,
+    generatedAt,
+    "PDF 4 OF 4"
+  );
+
+  y = drawSectionHeading(doc, "Overview", y, margin, contentWidth);
+
+  const totalLikes = forumPosts.reduce(
+    (sum: number, post: any) => sum + Number(post?.likes_count || 0),
+    0
+  );
+  const totalComments = forumPosts.reduce(
+    (sum: number, post: any) => sum + Number(post?.comments_count || 0),
+    0
+  );
+  const newestPostAt = forumPosts[0]?.created_at || null;
+  const oldestPostAt = forumPosts[forumPosts.length - 1]?.created_at || null;
+
+  const overviewFields = [
+    ["Total Posts", String(forumPosts.length)],
+    ["Total Likes", String(totalLikes)],
+    ["Total Comments", String(totalComments)],
+    ["Latest Post", toShortDate(newestPostAt)],
+    ["First Post", toShortDate(oldestPostAt)],
+    ["Exported At", toCompactDate(generatedAt)],
+  ];
+
+  const fieldGap = 12;
+  const colWidth = (contentWidth - fieldGap) / 2;
+
+  for (let i = 0; i < overviewFields.length; i += 2) {
+    const left = overviewFields[i];
+    const right = overviewFields[i + 1];
+    const cardH = 52;
+
+    y = ensurePageSpace(doc, y, cardH + 12, margin, pageHeight);
+    drawFieldCard(doc, margin, y, colWidth, cardH, left[0], left[1]);
+    if (right) {
+      drawFieldCard(
+        doc,
+        margin + colWidth + fieldGap,
+        y,
+        colWidth,
+        cardH,
+        right[0],
+        right[1]
+      );
+    }
+    y += cardH + 10;
+  }
+
+  y = drawSectionHeading(doc, "Posts", y + 4, margin, contentWidth);
+
+  if (forumPosts.length === 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(...BRAND.slateText);
+    doc.text("No forum posts were found for this account.", margin, y + 2);
+    y += 24;
+  } else {
+    for (let index = 0; index < forumPosts.length; index += 1) {
+      const post = forumPosts[index];
+      const title = String(post?.title || "Untitled Post");
+      const body = String(post?.body || "-").replace(/\s+/g, " ").trim();
+      const bodyPreview = body.length > 520 ? `${body.slice(0, 520)}...` : body;
+
+      const detailLine = `Tag: ${String(post?.tag || "general").toUpperCase()} | Likes: ${Number(post?.likes_count || 0)} | Comments: ${Number(post?.comments_count || 0)} | Date: ${toShortDate(post?.created_at)}`;
+      const bodyLines = doc.splitTextToSize(bodyPreview, contentWidth - 26);
+      const postHeight = 24 + 14 + bodyLines.length * 11 + 24;
+
+      y = ensurePageSpace(doc, y, postHeight + 8, margin, pageHeight);
+
+      doc.setFillColor(...BRAND.cardBg);
+      doc.setDrawColor(...BRAND.softBorder);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(margin, y, contentWidth, postHeight, 8, 8, "FD");
+
+      doc.setFillColor(...BRAND.accentBlue);
+      doc.rect(margin, y + 8, 3, postHeight - 16, "F");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(...BRAND.ink);
+      doc.text(`${index + 1}. ${title}`, margin + 12, y + 18);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(...BRAND.slateText);
+      doc.text(detailLine, margin + 12, y + 34);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...BRAND.ink);
+      doc.text(bodyLines, margin + 12, y + 50);
+
+      y += postHeight + 8;
+    }
+  }
+
+  y += 4;
+  y = drawLegalFooterCard(doc, y, margin, contentWidth, pageHeight);
+  addFootersToAllPages(doc);
+
+  return Buffer.from(doc.output("arraybuffer"));
+}
+
 function buildDataExportEmailHtml(
   userName: string,
   hasLogo: boolean
@@ -991,7 +1116,7 @@ function buildDataExportEmailHtml(
                   <td style="padding:24px 28px 10px;">
                     <h1 class="title" style="margin:0;font-size:22px;line-height:1.3;font-weight:800;color:#111827;">Hi ${safeName},</h1>
                     <p class="body-text" style="margin:14px 0 0;font-size:15px;line-height:1.7;color:#1f2937;">
-                      We've prepared a copy of your personal data from NIE Sync. Attached to this email you'll find <strong>3 PDF documents</strong> containing:
+                      We've prepared a copy of your personal data from NIE Sync. Attached to this email you'll find <strong>4 PDF documents</strong> containing:
                     </p>
                   </td>
                 </tr>
@@ -1022,6 +1147,14 @@ function buildDataExportEmailHtml(
                             🔐 <strong>Authentication History</strong>
                           </p>
                           <p class="muted" style="margin:4px 0 0;font-size:12px;line-height:1.5;color:#586274;">All login sessions, devices, IP addresses, and session activity.</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:14px 16px;border-top:1px solid #e5eaf3;">
+                          <p style="margin:0;font-size:13px;line-height:1.6;font-weight:700;color:#111827;">
+                            <strong>Forum Posts Archive</strong>
+                          </p>
+                          <p class="muted" style="margin:4px 0 0;font-size:12px;line-height:1.5;color:#586274;">Every forum post published from your account, including engagement stats.</p>
                         </td>
                       </tr>
                     </table>
@@ -1196,7 +1329,7 @@ async function processAndSendExport({
     const admin = createAdminClient();
 
     // Fetch all data in parallel
-    const [profileResult, reportsResult, sessionsResult] = await Promise.all([
+    const [profileResult, reportsResult, sessionsResult, forumPostsResult] = await Promise.all([
       admin
         .from("profiles")
         .select("*")
@@ -1218,11 +1351,20 @@ async function processAndSendExport({
         .eq("user_id", userId)
         .order("last_seen_at", { ascending: false })
         .limit(200),
+      admin
+        .from("forum_posts")
+        .select(
+          "id, author_id, title, body, tag, relation_type, location_label, is_anonymous, comments_count, upvotes_count, downvotes_count, likes_count, image_count, created_at, updated_at"
+        )
+        .eq("author_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(400),
     ]);
 
     const profileData = profileResult.data || {};
     const parkingReports = (reportsResult.data || []) as any[];
     const sessions = (sessionsResult.data || []) as any[];
+    const forumPosts = (forumPostsResult.data || []) as any[];
 
     // Fetch all messages for all reports
     const reportIds = parkingReports.map((r) => r.id);
@@ -1259,8 +1401,8 @@ async function processAndSendExport({
       .trim() || "User";
     const generatedAt = new Date().toISOString();
 
-    // Generate all 3 PDFs
-    const [pdf1Buffer, pdf2Buffer, pdf3Buffer] = await Promise.all([
+    // Generate all 4 PDFs
+    const [pdf1Buffer, pdf2Buffer, pdf3Buffer, pdf4Buffer] = await Promise.all([
       generateProfileSummaryPdf(profileData, parkingReports, authUser, generatedAt),
       generateTranscriptsPdf(
         parkingReports,
@@ -1270,6 +1412,7 @@ async function processAndSendExport({
         generatedAt
       ),
       generateAuthHistoryPdf(sessions, authUser, userName, generatedAt),
+      generateForumPostsPdf(forumPosts, userName, generatedAt),
     ]);
 
     // Wait 1 minute before sending the email
@@ -1296,6 +1439,11 @@ async function processAndSendExport({
       {
         filename: `NIE-Sync-Auth-History-${new Date().toISOString().slice(0, 10)}.pdf`,
         content: pdf3Buffer,
+        contentType: "application/pdf",
+      },
+      {
+        filename: `NIE-Sync-Forum-Posts-${new Date().toISOString().slice(0, 10)}.pdf`,
+        content: pdf4Buffer,
         contentType: "application/pdf",
       },
     ];

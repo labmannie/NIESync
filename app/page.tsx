@@ -4,8 +4,12 @@ import { Shield, Search, Camera, Key, MapPin, CheckCircle, ArrowRight, Zap, Targ
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { RainbowButton } from "@/components/ui/rainbow-button";
+import { PulsatingButton } from "@/components/ui/pulsating-button";
+import { AuroraText } from "@/components/ui/aurora-text";
 
 function HeroContent() {
   const [isAuth, setIsAuth] = useState(false);
@@ -44,7 +48,14 @@ function HeroContent() {
         </div>
 
         <h1 className="text-[48px] md:text-[80px] font-black text-white uppercase leading-[0.95] tracking-[-0.04em] mb-8">
-          CAMPUS SECURED.<br />
+          <AuroraText
+            className="font-black uppercase tracking-[-0.04em]"
+            colors={["#2563EB", "#60A5FA", "#FFB000", "#38BDF8"]}
+            speed={0.8}
+          >
+            CAMPUS SECURED.
+          </AuroraText>
+          <br />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-500">ITEMS RECOVERED.</span>
         </h1>
         <p className="text-text-secondary text-lg md:text-xl max-w-[600px] mb-12 leading-relaxed font-medium">
@@ -53,13 +64,21 @@ function HeroContent() {
 
         {mounted && !isAuth ? (
           <div className="flex flex-col sm:flex-row gap-5">
-            <Link href="/signup" className="flex items-center justify-center gap-3 bg-white text-campus-black font-bold tracking-wider uppercase text-sm px-10 py-5 clip-diagonal hover:bg-gray-200 transition-colors duration-200 shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_40px_rgba(255,255,255,0.4)]">
-              <span>Create Account</span>
-            </Link>
-            <Link href="/login" className="flex items-center justify-center gap-3 bg-accent-blue text-white font-bold tracking-wider uppercase text-sm px-10 py-5 clip-diagonal hover:bg-blue-500 transition-colors duration-200 shadow-[0_0_30px_rgba(37,99,235,0.4)] hover:shadow-[0_0_40px_rgba(37,99,235,0.6)]">
+            <RainbowButton
+              asChild
+              size="lg"
+              className="h-14 min-w-[220px] px-10 text-sm font-black uppercase tracking-[0.16em] [--speed:2.4s] [--color-1:#2563EB] [--color-2:#0EA5E9] [--color-3:#FFB000] [--color-4:#38BDF8] [--color-5:#60A5FA]"
+            >
+              <Link href="/signup">
+                <span>Create Account</span>
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </RainbowButton>
+            <Link href="/login" className="inline-flex h-14 min-w-[220px] items-center justify-center gap-3 rounded-xl border border-accent-blue/45 bg-[linear-gradient(135deg,#2563EB_0%,#1D4ED8_100%)] px-10 text-sm font-bold tracking-[0.16em] uppercase text-white transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_35px_rgba(37,99,235,0.45)]">
+              <Lock className="h-4 w-4" />
               <span>Institutional Login</span>
             </Link>
-            <Link href="#features" className="flex items-center justify-center gap-3 bg-transparent text-white border border-white/20 px-8 py-5 hover:bg-white/10 transition-colors duration-200 font-bold tracking-wider uppercase text-sm shadow-xl">
+            <Link href="#features" className="inline-flex h-14 min-w-[170px] items-center justify-center gap-3 rounded-xl border border-white/20 bg-transparent px-8 text-sm font-bold tracking-[0.16em] uppercase text-white transition-colors duration-200 hover:bg-white/10 shadow-xl">
               <span>Explore</span>
             </Link>
           </div>
@@ -140,6 +159,8 @@ function LostFoundCard() {
 }
 
 function ExpandedContent() {
+  const router = useRouter();
+
   const highlightFeatures = [
     {
       title: "Real-time Alerts",
@@ -286,10 +307,20 @@ function ExpandedContent() {
           className="relative z-10 max-w-4xl mx-auto px-8"
         >
           <h2 className="text-4xl md:text-5xl font-black uppercase tracking-tight mb-8">Ready to sync?</h2>
-          <Link href="/login" className="inline-flex items-center justify-center gap-3 bg-white text-campus-black font-black uppercase tracking-widest px-12 py-5 clip-diagonal hover:bg-gray-200 transition-colors shadow-[0_0_40px_rgba(255,255,255,0.2)] hover:shadow-[0_0_50px_rgba(255,255,255,0.4)] md:text-lg">
-            Authenticate Identity
-            <ArrowRight className="w-6 h-6" />
-          </Link>
+          <PulsatingButton
+            type="button"
+            onClick={() => router.push("/login")}
+            variant="ripple"
+            duration="1.6s"
+            distance="20px"
+            pulseColor="rgba(37,99,235,0.62)"
+            className="mx-auto inline-flex h-14 items-center justify-center gap-3 whitespace-nowrap rounded-xl border border-accent-blue/45 bg-[linear-gradient(135deg,#2563EB_0%,#1D4ED8_100%)] px-12 text-base font-black uppercase tracking-[0.15em] text-white transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_0_42px_rgba(37,99,235,0.45)] md:text-lg"
+          >
+            <span className="inline-flex items-center gap-2 whitespace-nowrap">
+              Authenticate Identity
+              <ArrowRight className="h-5 w-5 shrink-0" />
+            </span>
+          </PulsatingButton>
         </motion.div>
       </section>
     </>

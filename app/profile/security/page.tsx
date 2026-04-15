@@ -733,7 +733,7 @@ export default function ProfileSecurityPage() {
                       <div>
                         <p className="text-xs font-bold text-amber-100 sm:text-sm">This may take a few minutes</p>
                         <p className="mt-1 text-[11px] leading-relaxed text-amber-200/80 sm:text-xs">
-                          We'll gather your complete profile, all parking reports with chat transcripts, and your full authentication history. This data will be compiled into <strong>3 professionally formatted PDF documents</strong> and sent directly to your registered email.
+                          We'll gather your complete profile, all parking reports with chat transcripts, your full authentication history, and your forum posting archive. This data will be compiled into <strong>4 professionally formatted PDF documents</strong> and sent directly to your registered email.
                         </p>
                       </div>
                     </div>
@@ -750,6 +750,10 @@ export default function ProfileSecurityPage() {
                       <div className="flex items-center gap-2.5 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5">
                         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent-blue/15 text-[10px] font-black text-accent-blue sm:h-7 sm:w-7 sm:text-[11px]">3</div>
                         <p className="text-[11px] text-white/80 sm:text-xs"><span className="font-bold text-white">Auth History</span> — Complete login & session records</p>
+                      </div>
+                      <div className="flex items-center gap-2.5 rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5">
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent-blue/15 text-[10px] font-black text-accent-blue sm:h-7 sm:w-7 sm:text-[11px]">4</div>
+                        <p className="text-[11px] text-white/80 sm:text-xs"><span className="font-bold text-white">Forum Posts Archive</span> - Every forum post you have published</p>
                       </div>
                     </div>
 

@@ -13,6 +13,11 @@ const rubik = Rubik({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "NIE Campus Sync",
   description: "The unified portal for NIE students to report parking violations and track lost items in real-time.",
+  icons: {
+    icon: [{ url: "/icon.ico", sizes: "any", type: "image/x-icon" }],
+    shortcut: ["/icon.ico"],
+    apple: ["/icon.ico"],
+  },
 };
 
 export default function RootLayout({

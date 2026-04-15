@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import NextImage from "next/image";
 import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
@@ -80,6 +81,7 @@ type ProfileIdentityRow = {
   username: string | null;
   first_name: string | null;
   last_name: string | null;
+  avatar_url: string | null;
 };
 
 type UnmatchedReportSnapshot = {
@@ -351,6 +353,7 @@ function ParkingPatrolPageContent() {
   );
   const [reportPhotoUrlById, setReportPhotoUrlById] = useState<Record<string, string>>({});
   const [participantTagById, setParticipantTagById] = useState<Record<string, string>>({});
+  const [participantAvatarById, setParticipantAvatarById] = useState<Record<string, string>>({});
   const [clockMs, setClockMs] = useState(() => Date.now());
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -789,20 +792,27 @@ function ParkingPatrolPageContent() {
     const loadParticipantTags = async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, username, first_name, last_name")
+        .select("id, username, first_name, last_name, avatar_url")
         .in("id", participantIds);
 
       if (cancelled || error) return;
 
       const tagMap: Record<string, string> = {};
+      const avatarMap: Record<string, string> = {};
       ((data || []) as ProfileIdentityRow[]).forEach((row) => {
         const tag = formatThreadParticipantTag(row);
         if (tag) {
           tagMap[row.id] = tag;
         }
+
+        const avatarUrl = String(row.avatar_url || "").trim();
+        if (avatarUrl) {
+          avatarMap[row.id] = avatarUrl;
+        }
       });
 
       setParticipantTagById((prev) => ({ ...prev, ...tagMap }));
+      setParticipantAvatarById((prev) => ({ ...prev, ...avatarMap }));
     };
 
     void loadParticipantTags();
@@ -1703,20 +1713,44 @@ function ParkingPatrolPageContent() {
                           ? message.sender_id === userId
                           : (isReporter && message.sender_role === "reporter") ||
                             (isOwner && message.sender_role === "owner");
+                        const senderId = String(
+                          message.sender_id ||
+                            (message.sender_role === "reporter"
+                              ? selectedReport?.reported_by || ""
+                              : selectedReport?.matched_owner_id || "")
+                        ).trim();
+                        const senderAvatarUrl = senderId ? participantAvatarById[senderId] || "" : "";
+                        const senderLabel = getThreadRoleLabel(message, selectedReport, userId, participantTagById);
+                        const senderFallbackName = String(
+                          (senderId ? participantTagById[senderId] : "") || senderLabel || "U"
+                        );
+                        const senderInitial = String(senderFallbackName || "U")
+                          .replace(/[^A-Za-z0-9]/g, "")
+                          .slice(0, 1)
+                          .toUpperCase() || "U";
                         return (
                           <div key={message.id} className={isOwnMessage ? "flex justify-end" : "flex justify-start"}>
-                            <div className="max-w-[80%]">
-                              <p className={`mb-1 text-[10px] text-[#555] ${isOwnMessage ? "text-right" : ""}`}>
-                                {getThreadRoleLabel(message, selectedReport, userId, participantTagById)}
-                              </p>
-                              <div
-                                className={`rounded-2xl px-4 py-2.5 text-sm ${
-                                  isOwnMessage
-                                    ? "rounded-tr-sm border border-[#f5a623]/20 bg-[#f5a623]/15 text-[#f5a623]"
-                                    : "rounded-tl-sm border border-white/[0.06] bg-white/[0.04] text-[#ccc]"
-                                }`}
-                              >
-                                {message.message}
+                            <div className={`flex max-w-[92%] items-end gap-2 ${isOwnMessage ? "flex-row-reverse" : ""}`}>
+                              <span className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/[0.08] text-[10px] font-bold uppercase text-white/85">
+                                {senderAvatarUrl ? (
+                                  <NextImage src={senderAvatarUrl} alt={`${senderLabel} avatar`} fill className="object-cover" />
+                                ) : (
+                                  senderInitial
+                                )}
+                              </span>
+                              <div className="max-w-[calc(100%-2.5rem)]">
+                                <p className={`mb-1 text-[10px] text-[#555] ${isOwnMessage ? "text-right" : ""}`}>
+                                  {senderLabel}
+                                </p>
+                                <div
+                                  className={`rounded-2xl px-4 py-2.5 text-sm ${
+                                    isOwnMessage
+                                      ? "rounded-tr-sm border border-[#f5a623]/20 bg-[#f5a623]/15 text-[#f5a623]"
+                                      : "rounded-tl-sm border border-white/[0.06] bg-white/[0.04] text-[#ccc]"
+                                  }`}
+                                >
+                                  {message.message}
+                                </div>
                               </div>
                             </div>
                           </div>

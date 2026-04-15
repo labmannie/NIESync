@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",
+    "@radix-ui/react-slot": "^1.2.4",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.103.0",
     "bad-words": "^3.0.4",

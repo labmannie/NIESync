@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpRight, Car, FileWarning, History, Menu, ShieldCheck, User, X } from "lucide-react";
+import { ArrowUpRight, Car, FileWarning, Heart, History, Menu, ShieldCheck, User, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -44,6 +44,12 @@ const navItems: NavItem[] = [
     label: "Auth History",
     icon: <History className="h-4 w-4" />,
     isActive: (pathname) => pathname.startsWith("/profile/sessions"),
+  },
+  {
+    href: "/profile/likes",
+    label: "Liked Posts",
+    icon: <Heart className="h-4 w-4" />,
+    isActive: (pathname) => pathname.startsWith("/profile/likes"),
   },
 ];
 

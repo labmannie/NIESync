@@ -284,6 +284,7 @@ export function Navbar() {
   const privateLinks = [
     { name: "Lost & Found", href: "/lost-and-found" },
     { name: "Parking Patrol", href: "/parking-patrol" },
+    { name: "Forum", href: "/forum" },
     { name: "Leaderboard", href: "/leaderboard" },
   ];
 

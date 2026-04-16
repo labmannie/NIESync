@@ -58,7 +58,6 @@ const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
 
 const BATCH_OPTIONS = ["ISE", "CSE", "CSE(AI/ML)", "MECHANICAL", "CIVIL", "ECE", "EEE", "OTHER"];
 const YEAR_OPTIONS = ["I Year", "II Year", "III Year", "IV Year"];
-const ROLE_OPTIONS = ["Day Scholar", "Hostelite", "Faculty"];
 
 function formatMemberSince(value?: string | null) {
   if (!value) return "";
@@ -324,7 +323,7 @@ export default function ProfilePage() {
         throw new Error("First name and last name are required.");
       }
 
-      const role = String(draft.role || "Day Scholar").trim();
+      const role = profile?.user_type === "Faculty" ? "Faculty" : String(draft.role || "Day Scholar").trim();
       const isHostelite = role === "Hostelite";
 
       const payload = {
@@ -553,21 +552,25 @@ export default function ProfilePage() {
                 <p className="mt-1 text-sm font-semibold text-white">{profile?.user_type || "-"}</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">USN</p>
-                <p className="mt-1 text-sm font-semibold text-white">{profile?.usn || "-"}</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
                 <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Role</p>
                 <p className="mt-1 text-sm font-semibold text-white">{profile?.role || "-"}</p>
               </div>
-              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Batch</p>
-                <p className="mt-1 text-sm font-semibold text-white">{profile?.batch || "-"}</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Year</p>
-                <p className="mt-1 text-sm font-semibold text-white">{profile?.year_of_study || "-"}</p>
-              </div>
+              {profile?.user_type === "Student" ? (
+                <>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">USN</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{profile?.usn || "-"}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Batch</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{profile?.batch || "-"}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Year</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{profile?.year_of_study || "-"}</p>
+                  </div>
+                </>
+              ) : null}
               <div className="rounded-xl border border-white/10 bg-black/25 p-3 sm:col-span-2">
                 <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Residence</p>
                 <p className="mt-1 text-sm font-semibold text-white">
@@ -645,60 +648,74 @@ export default function ProfilePage() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-                <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">USN</p>
-                <p className="mt-1 text-sm font-semibold text-white">{profile?.usn || "-"}</p>
-                <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
-                  Locked after initial setup
-                </p>
-              </div>
+              {profile?.user_type === "Student" ? (
+                <>
+                  <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">USN</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{profile?.usn || "-"}</p>
+                    <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+                      Locked after initial setup
+                    </p>
+                  </div>
 
-              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
-                Batch
-                <select
-                  value={draft.batch}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, batch: event.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
-                >
-                  <option value="" className="bg-campus-black">Select batch</option>
-                  {BATCH_OPTIONS.map((batch) => (
-                    <option key={batch} value={batch} className="bg-campus-black">
-                      {batch}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                    Batch
+                    <select
+                      value={draft.batch}
+                      onChange={(event) => setDraft((prev) => ({ ...prev, batch: event.target.value }))}
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
+                    >
+                      <option value="" className="bg-campus-black">Select batch</option>
+                      {BATCH_OPTIONS.map((batch) => (
+                        <option key={batch} value={batch} className="bg-campus-black">
+                          {batch}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
-                Year
-                <select
-                  value={draft.year}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, year: event.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
-                >
-                  <option value="" className="bg-campus-black">Select year</option>
-                  {YEAR_OPTIONS.map((year) => (
-                    <option key={year} value={year} className="bg-campus-black">
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                    Year
+                    <select
+                      value={draft.year}
+                      onChange={(event) => setDraft((prev) => ({ ...prev, year: event.target.value }))}
+                      className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
+                    >
+                      <option value="" className="bg-campus-black">Select year</option>
+                      {YEAR_OPTIONS.map((year) => (
+                        <option key={year} value={year} className="bg-campus-black">
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : null}
 
-              <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
-                Role
-                <select
-                  value={draft.role}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, role: event.target.value }))}
-                  className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
-                >
-                  {ROLE_OPTIONS.map((role) => (
-                    <option key={role} value={role} className="bg-campus-black">
-                      {role}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {profile?.user_type === "Faculty" ? (
+                <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-white/45">Role</p>
+                  <p className="mt-1 text-sm font-semibold text-white">Faculty</p>
+                  <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/35">
+                    Locked
+                  </p>
+                </div>
+              ) : (
+                <label className="text-xs font-bold uppercase tracking-[0.12em] text-text-secondary">
+                  Role
+                  <select
+                    value={draft.role}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, role: event.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/35 p-3 text-sm text-white outline-none transition-colors focus:border-accent-blue/50"
+                  >
+                    {["Day Scholar", "Hostelite"].map((role) => (
+                      <option key={role} value={role} className="bg-campus-black">
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               {draft.role === "Hostelite" ? (
                 <>

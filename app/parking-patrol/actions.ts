@@ -1,5 +1,5 @@
+
 "use server";
-import { revalidatePath } from "next/cache";
 
 import { randomUUID } from "crypto";
 import { createClient as createServerClient } from "@/utils/supabase/server";
@@ -409,6 +409,13 @@ export async function submitParkingReportAction(
   };
 }
 
+/**
+ * These mutation actions intentionally do not call revalidatePath().
+ * The parking patrol surface is driven by Supabase Realtime subscriptions
+ * plus optimistic client updates. For a live chat/timer UI, forcing a route
+ * revalidation causes visible refreshes, focus loss, timer jitter, and scroll
+ * jumps even though the page is already subscribed to the underlying tables.
+ */
 export async function sendParkingMessageAction(
   reportId: string,
   message: string
@@ -428,8 +435,10 @@ export async function sendParkingMessageAction(
     _message: normalizedMessage,
   });
 
-  if (error) return { ok: false, error: mapThreadActionError(error.message || "Unable to send message.") };
-  revalidatePath("/parking-patrol");
+  if (error) {
+    return { ok: false, error: mapThreadActionError(error.message || "Unable to send message.") };
+  }
+
   return { ok: true };
 }
 
@@ -439,8 +448,10 @@ export async function ownerImMovingAction(reportId: string): Promise<BasicAction
     _report_id: reportId,
   });
 
-  if (error) return { ok: false, error: mapThreadActionError(error.message || "Unable to acknowledge movement.") };
-  revalidatePath("/parking-patrol");
+  if (error) {
+    return { ok: false, error: mapThreadActionError(error.message || "Unable to acknowledge movement.") };
+  }
+
   return { ok: true };
 }
 
@@ -450,8 +461,10 @@ export async function reporterMarkResolvedAction(reportId: string): Promise<Basi
     _report_id: reportId,
   });
 
-  if (error) return { ok: false, error: mapThreadActionError(error.message || "Unable to resolve report.") };
-  revalidatePath("/parking-patrol");
+  if (error) {
+    return { ok: false, error: mapThreadActionError(error.message || "Unable to resolve report.") };
+  }
+
   return { ok: true };
 }
 
@@ -467,7 +480,7 @@ export async function reporterMarkUnresolvedAction(reportId: string): Promise<Ba
       error: mapThreadActionError(error.message || "Unable to reopen this report."),
     };
   }
-  revalidatePath("/parking-patrol");
+
   return { ok: true };
 }
 
@@ -483,7 +496,7 @@ export async function reporterCancelReportAction(reportId: string): Promise<Basi
       error: mapThreadActionError(error.message || "Unable to cancel this report."),
     };
   }
-  revalidatePath("/parking-patrol");
+
   return { ok: true };
 }
 
@@ -505,7 +518,6 @@ export async function revealParkingPhoneAction(
     return { ok: false, error: "Owner phone number is unavailable." };
   }
 
-  revalidatePath("/parking-patrol");
   return { ok: true, phone };
 }
 

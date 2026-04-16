@@ -33,8 +33,8 @@ function ResetPasswordContent() {
     });
 
     // Also check if user is already authenticated (e.g. navigated directly)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
         setIsReady(true);
       }
     });

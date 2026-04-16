@@ -27,8 +27,10 @@ function HeroContent() {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuth(!!session);
+    } = supabase.auth.onAuthStateChange(() => {
+      void resolveClientUser(supabase).then(({ user }) => {
+        setIsAuth(!!user);
+      });
     });
 
     return () => subscription.unsubscribe();

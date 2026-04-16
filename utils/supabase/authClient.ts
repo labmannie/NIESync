@@ -15,27 +15,6 @@ export async function resolveClientUser(supabase: SupabaseClient): Promise<{
   errorMessage: string;
 }> {
   const timeoutMs = Math.min(4000, getSupabaseRequestTimeoutMs());
-  const quickTimeoutMs = Math.min(1200, timeoutMs);
-
-  try {
-    const { data, error } = await withTimeout(
-      supabase.auth.getSession(),
-      quickTimeoutMs,
-      "auth.getSession"
-    );
-    if (data?.session?.user) {
-      return { user: data.session.user, errorMessage: "" };
-    }
-    if (error && !/auth session missing/i.test(String(error.message || ""))) {
-      return { user: null, errorMessage: String(error.message || "Unable to fetch session.") };
-    }
-  } catch (error: any) {
-    const message = String(error?.message || "");
-    const isExpected = /auth session missing|timed out/i.test(message);
-    if (!isExpected) {
-      console.warn("[Supabase] resolveClientUser(getSession) failed:", message || error);
-    }
-  }
 
   try {
     const { data, error } = await withTimeout(

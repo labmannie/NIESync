@@ -361,13 +361,12 @@ function StatPill({
   const content = (
     <span
       className={cx(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition-all duration-200",
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-semibold transition-all duration-200",
         tones[tone]
       )}
       title={title || label}
     >
       <span className="forum-action-icon-small">{icon}</span>
-      <span className="text-[11px] uppercase tracking-[0.12em]">{label}</span>
       <span className="font-black text-white">{compactNumber(value)}</span>
     </span>
   );
@@ -816,18 +815,21 @@ export default function ForumPage() {
       const delta = y - lastY;
       const mobile = window.matchMedia("(max-width: 767px)").matches;
 
-      setShowScrollTop(y > (mobile ? 320 : 220));
+      setShowScrollTop((prev) => {
+        if (typeof window !== "undefined" && y < window.innerHeight * 9) return false;
+        if (delta > 6) return true;
+        if (delta < -6) return false;
+        return prev;
+      });
 
       let nextState: HeaderState = headerStateRef.current;
       if (collapseLocked) {
         nextState = mobile ? "hidden" : "compact";
-      } else if (!mobile) {
-        nextState = y > 44 ? "compact" : "expanded";
-      } else if (y <= 72) {
+      } else if (y <= 5) {
         nextState = "expanded";
-      } else if (delta > 10 && y > 140) {
+      } else if (delta > 4 && y > 40) {
         nextState = "hidden";
-      } else if (delta < -8 || y < 128) {
+      } else if (delta < -4) {
         nextState = "compact";
       }
 
@@ -869,7 +871,10 @@ export default function ForumPage() {
 
   useEffect(() => {
     if (!composerOpen) return;
-    composerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const timer = window.setTimeout(() => {
+      composerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
+    return () => window.clearTimeout(timer);
   }, [composerOpen, composerMode, editingPost?.id]);
 
   useEffect(() => {
@@ -1112,7 +1117,7 @@ export default function ForumPage() {
         return next;
       });
       delete likeAnimationTimers.current[postId];
-    }, 520);
+    }, 650);
   }, []);
 
   const pickImages = (files: FileList | null) => {
@@ -1861,7 +1866,7 @@ export default function ForumPage() {
   const renderComposerPanel = () => (
     <section
       ref={composerRef}
-      className="forum-fade-up rounded-[28px] border border-accent-blue/25 bg-[linear-gradient(180deg,rgba(11,15,26,0.94),rgba(9,11,18,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+      className="forum-fade-up scroll-mt-[100px] md:scroll-mt-[130px] rounded-[28px] border border-accent-blue/25 bg-[linear-gradient(180deg,rgba(11,15,26,0.94),rgba(9,11,18,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
     >
       <div className="flex items-start justify-between gap-3 border-b border-white/8 px-4 py-4 md:px-5">
         <div className="flex items-start gap-3">
@@ -2069,16 +2074,6 @@ export default function ForumPage() {
             <Sparkles className="h-4 w-4 text-accent-amber" />
           </button>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={composerToggle}
-              className="inline-flex items-center gap-2 rounded-full border border-accent-blue/30 bg-accent-blue/15 px-4 py-2 text-xs font-black uppercase tracking-[0.12em] text-white"
-            >
-              <PenSquare className="h-4 w-4" />
-              New thread
-            </button>
-          </div>
         </div>
       </div>
     </section>
@@ -2270,20 +2265,23 @@ export default function ForumPage() {
               <button
                 type="button"
                 onClick={() => void likePost(post.id)}
+                title="Like post"
                 className={cx(
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition-all duration-200",
+                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-semibold transition-all duration-200",
                   liked
                     ? "border-pink-400/45 bg-pink-500/16 text-pink-100"
-                    : "border-white/10 bg-white/[0.03] text-white/72 hover:border-pink-400/28 hover:bg-pink-500/10 hover:text-pink-100"
+                    : "border-white/10 bg-white/[0.03] text-white/72 hover:border-pink-400/28 hover:bg-pink-500/10 hover:text-white"
                 )}
               >
                 <span className="relative inline-flex h-4 w-4 items-center justify-center">
                   {likeAnimatingIds.has(post.id) && liked ? (
-                    <span className="forum-like-ring absolute inset-[-7px]" />
+                    <>
+                      <span className="forum-like-wave" />
+                      <span className="forum-like-super-burst" />
+                    </>
                   ) : null}
-                  <Heart className={cx("relative z-[1] h-4 w-4", liked && "fill-current", likeAnimatingIds.has(post.id) && "forum-heart-pop")} />
+                  <Heart className={cx("relative z-[1] h-4 w-4", liked && "fill-current text-pink-500", likeAnimatingIds.has(post.id) && "forum-heart-pop")} />
                 </span>
-                <span className="text-[11px] uppercase tracking-[0.12em]">Likes</span>
                 <span className="font-black text-white">{compactNumber(post.likes_count)}</span>
               </button>
             </div>
@@ -2514,12 +2512,13 @@ export default function ForumPage() {
             <header
               className={cx(
                 railCardClass,
-                "sticky top-16 z-30 overflow-hidden transition-[box-shadow,border-color] duration-200 md:top-24",
+                "sticky top-[86px] z-30 transition-[transform,box-shadow,border-color,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] md:top-[112px]",
                 headerCompact && !detailMode && "shadow-[0_20px_65px_rgba(0,0,0,0.5)]",
-                headerHidden && !detailMode && "max-md:border-white/0 max-md:shadow-none"
+                headerHidden && !detailMode && "pointer-events-none -translate-y-[calc(100%+20px)] opacity-0 border-transparent shadow-none",
+                !headerHidden && !detailMode && "translate-y-0 opacity-100"
               )}
             >
-              <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(37,99,235,0.55),rgba(255,176,0,0.35),transparent)]" />
+              {!headerHidden && <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(37,99,235,0.55),rgba(255,176,0,0.35),transparent)]" />}
               <div
                 className={cx(
                   "overflow-hidden px-4 md:px-5",
@@ -2582,7 +2581,7 @@ export default function ForumPage() {
 
                     <div
                       className={cx(
-                        "flex w-full flex-wrap items-center gap-2 overflow-hidden transition-all duration-300",
+                        "hidden md:flex w-full flex-wrap items-center gap-2 overflow-hidden transition-all duration-300",
                         headerCompact || headerHidden ? "max-h-0 opacity-0 pointer-events-none" : "max-h-16 opacity-100"
                       )}
                     >
@@ -3078,7 +3077,7 @@ export default function ForumPage() {
         aria-label="Scroll to top"
         title="Scroll to top"
       >
-        <ArrowUp className="h-5 w-5" />
+        <ArrowUp className="h-5 w-5 forum-subtle-bounce" />
       </button>
 
       {!detailMode ? (
@@ -3160,13 +3159,70 @@ const forumGlobalStyles = `
   }
 
   .forum-heart-pop {
-    animation: forumHeartPop 0.42s cubic-bezier(.2,.9,.2,1.2);
+    animation: forumHeartPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
   }
 
-  .forum-like-ring {
-    border-radius: 9999px;
-    border: 2px solid rgba(244,114,182,0.5);
-    animation: forumLikeRing 0.5s ease-out forwards;
+  .forum-like-super-burst, .forum-like-super-burst::before, .forum-like-super-burst::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+  }
+
+  .forum-like-super-burst {
+    transform: translate(-50%, -50%);
+    box-shadow: 
+      0 -26px 0 1px #f472b6,
+      22px -16px 0 0px #fb7185,
+      26px 10px 0 1px #ec4899,
+      16px 22px 0 0px #e11d48,
+      0 26px 0 1px #f43f5e,
+      -16px 22px 0 0px #fb7185,
+      -26px 10px 0 1px #ec4899,
+      -22px -16px 0 0px #f472b6;
+    animation: forumSuperBurstPrimary 0.6s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
+  }
+
+  .forum-like-super-burst::before {
+    content: "";
+    box-shadow: 
+      0 -36px 0 0 #f472b6,
+      30px -20px 0 0 #f43f5e,
+      36px 12px 0 0 #ec4899,
+      20px 30px 0 0 #fb7185,
+      0 36px 0 0 #e11d48,
+      -20px 30px 0 0 #f472b6,
+      -36px 12px 0 0 #ec4899,
+      -30px -20px 0 0 #fb7185;
+    animation: forumSuperBurstSecondary 0.6s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
+  }
+
+  .forum-like-super-burst::after {
+    content: "";
+    box-shadow: 
+      -18px -30px 0 -1px #f472b6,
+      18px -30px 0 -1px #ec4899,
+      32px -6px 0 -1px #fb7185,
+      32px 6px 0 -1px #f43f5e,
+      18px 30px 0 -1px #e11d48,
+      -18px 30px 0 -1px #f472b6,
+      -32px 6px 0 -1px #ec4899,
+      -32px -6px 0 -1px #fb7185;
+    animation: forumSuperBurstTertiary 0.6s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
+  }
+
+  .forum-like-wave {
+    position: absolute;
+    inset: -9px;
+    border-radius: 50%;
+    border: 3px solid rgba(236, 72, 153, 0.7);
+    animation: forumWave 0.6s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+  }
+
+  .forum-subtle-bounce {
+    animation: forumSubtleBounce 2s ease-in-out infinite;
   }
 
   .forum-action-icon-small {
@@ -3204,26 +3260,40 @@ const forumGlobalStyles = `
   }
 
   @keyframes forumHeartPop {
-    0% {
-      transform: scale(0.75);
-    }
-    60% {
-      transform: scale(1.18);
-    }
-    100% {
-      transform: scale(1);
-    }
+    0% { transform: scale(1); filter: brightness(1); }
+    15% { transform: scale(0.6) rotate(-12deg); filter: brightness(1.5); }
+    30% { transform: scale(1.4) rotate(8deg); filter: brightness(1.2); }
+    50% { transform: scale(0.9) rotate(-4deg); }
+    75% { transform: scale(1.1) rotate(2deg); }
+    100% { transform: scale(1) rotate(0deg); }
   }
 
-  @keyframes forumLikeRing {
-    0% {
-      opacity: 0.7;
-      transform: scale(0.72);
-    }
-    100% {
-      opacity: 0;
-      transform: scale(1.55);
-    }
+  @keyframes forumSuperBurstPrimary {
+    0% { opacity: 1; transform: translate(-50%, -50%) scale(0.1); }
+    50% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); }
+  }
+
+  @keyframes forumSuperBurstSecondary {
+    0% { opacity: 1; transform: translate(-50%, -50%) scale(0.1) rotate(15deg); }
+    50% { opacity: 1; transform: translate(-50%, -50%) scale(0.9) rotate(15deg); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.2) rotate(15deg); }
+  }
+
+  @keyframes forumSuperBurstTertiary {
+    0% { opacity: 1; transform: translate(-50%, -50%) scale(0.1) rotate(-15deg); }
+    50% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-15deg); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.3) rotate(-15deg); }
+  }
+
+  @keyframes forumWave {
+    0% { transform: scale(0.3); opacity: 1; border-width: 4px; }
+    100% { transform: scale(2.2); opacity: 0; border-width: 0px; }
+  }
+
+  @keyframes forumSubtleBounce {
+    0%, 100% { transform: translateY(-10%); }
+    50% { transform: translateY(10%); }
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -40,8 +40,8 @@ function mapReportSubmissionError(message: string) {
   if (normalized.includes("max 3 reports in 2 hours")) {
     return "Rate limit hit: max 3 reports in a rolling 2-hour window.";
   }
-  if (normalized.includes("max 2 reports per plate in 24 hours")) {
-    return "Rate limit hit: this vehicle already has 2 reports in the last 24 hours.";
+  if (normalized.includes("max 4 reports per plate in 24 hours")) {
+    return "Rate limit hit: this vehicle already has 4 reports in the last 24 hours.";
   }
   if (normalized.includes("already have an open parking report")) {
     return "You already have one unresolved active report. Resolve it before creating a new one.";

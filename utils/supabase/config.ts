@@ -1,4 +1,4 @@
-const SUPABASE_REQUEST_TIMEOUT_MS = 5000;
+const SUPABASE_REQUEST_TIMEOUT_MS = 15000;
 
 function sanitizeEnvValue(value?: string) {
   return String(value || "").trim().replace(/^['"]|['"]$/g, "");

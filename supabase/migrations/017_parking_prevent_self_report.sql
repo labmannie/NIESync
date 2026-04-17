@@ -44,8 +44,8 @@ begin
     from public.parking_reports
     where plate_normalized = _normalized
       and created_at >= now() - interval '24 hours'
-  ) >= 2 then
-    raise exception 'Rate limit exceeded: max 2 reports per plate in 24 hours';
+  ) >= 4 then
+    raise exception 'Rate limit exceeded: max 4 reports per plate in 24 hours';
   end if;
 
   if exists (

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Heart, MessageSquare, ThumbsDown, ThumbsUp } from "lucide-react";
+import { ArrowBigDown, ArrowBigUp, Heart, MessageSquare } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
 
@@ -202,7 +202,7 @@ export default function LikedPostsPage() {
   }, [supabase, userId, loadLikedPosts]);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
+    <main className="campus-app-gradient min-h-screen px-4 pb-16 pt-32 text-white md:px-8">
       <div className="mx-auto w-full max-w-6xl">
         <header className="rounded-[28px] border border-white/10 bg-[linear-gradient(135deg,rgba(37,99,235,0.14)_0%,rgba(255,176,0,0.1)_55%,rgba(255,255,255,0.04)_100%)] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.5)] md:p-7">
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-text-secondary">Profile</p>
@@ -268,11 +268,11 @@ export default function LikedPostsPage() {
 
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-white/70">
                       <span className="inline-flex items-center gap-1 rounded-lg border border-white/12 bg-white/[0.03] px-2 py-1">
-                        <ThumbsUp className="h-3.5 w-3.5" />
+                        <ArrowBigUp className="h-3.5 w-3.5 text-emerald-200" />
                         {post.upvotes_count}
                       </span>
                       <span className="inline-flex items-center gap-1 rounded-lg border border-white/12 bg-white/[0.03] px-2 py-1">
-                        <ThumbsDown className="h-3.5 w-3.5" />
+                        <ArrowBigDown className="h-3.5 w-3.5 text-rose-200" />
                         {post.downvotes_count}
                       </span>
                       <span className="inline-flex items-center gap-1 rounded-lg border border-white/12 bg-white/[0.03] px-2 py-1">

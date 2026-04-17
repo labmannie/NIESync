@@ -1,32 +1,58 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Shield, ChevronRight, ChevronLeft, Check, AlertCircle, Info, Car, Home as HomeIcon, User, Mail, Lock, Eye, EyeOff } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
-import { createClient } from "@/utils/supabase/client";
-import { MobileToast } from "@/components/MobileToast";
-import { GoogleMark } from "@/app/_components/GoogleMark";
-import {
-  normalizePhoneNumber,
-  validateRequiredPhoneNumber,
-} from "@/lib/phone";
-import {
-  formatOwnerVehiclePlateInput,
-  getOwnerVehiclePlateFormatsHint,
-  validateOwnerVehiclePlate,
-} from "@/lib/vehiclePlate";
-import 'react-phone-number-input/style.css';
-import PhoneInput from 'react-phone-number-input';
+import { useRouter, useSearchParams } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff } from "lucide-react";
 
-const TOTAL_STEPS = 4;
-const BATCH_OPTIONS = ["ISE", "CSE", "CSE(AI/ML)", "MECHANICAL", "CIVIL", "ECE", "EEE", "OTHER"];
-const YEAR_OPTIONS = ["I Year", "II Year", "III Year", "IV Year"];
-const DOMAIN_RESTRICTION_MESSAGE = "Access restricted to NIE students and staff only.";
-const GROUP_EMAIL_BLOCK_MESSAGE =
-  "Group email addresses are not allowed for individual accounts.";
+import { AuthAlert } from "@/components/AuthAlert";
+import { AuthCampusFields, AuthProfileIdentityFields, AuthProfileDetailsState } from "@/components/AuthProfileFormFields";
+import { AuthField } from "@/components/AuthField";
+import { AuthSection } from "@/components/AuthSection";
+import { AuthShell } from "@/components/AuthShell";
+import { GoogleMark } from "@/app/_components/GoogleMark";
+import { createClient } from "@/utils/supabase/client";
+import { normalizePhoneNumber, validateRequiredPhoneNumber } from "@/lib/phone";
+import { formatOwnerVehiclePlateInput, validateOwnerVehiclePlate } from "@/lib/vehiclePlate";
+import {
+  DOMAIN_RESTRICTION_MESSAGE,
+  GROUP_EMAIL_BLOCK_MESSAGE,
+  checkAuthEmailStatus,
+  isAllowedAuthEmail,
+  normalizeInstitutionalEmail,
+} from "@/lib/authEmail";
+
+type SignupFormState = AuthProfileDetailsState & {
+  email: string;
+  password: string;
+};
+
+type SignupFieldErrors = Partial<Record<keyof SignupFormState | "acceptedPolicies", string>>;
+
+const initialFormState: SignupFormState = {
+  email: "",
+  password: "",
+  userType: "Student",
+  firstName: "",
+  lastName: "",
+  usn: "",
+  batch: "",
+  year: "",
+  phone: "",
+  role: "Day Scholar",
+  campus: "South Campus",
+  hostelName: "NIE North Boys Hostel",
+  roomNo: "",
+  hasVehicle: "No",
+  vehicleNo: "",
+};
+
+const SIGNUP_STEPS = [
+  { label: "Account", detail: "Email and method" },
+  { label: "Profile", detail: "Basic details" },
+  { label: "Campus", detail: "Stay and vehicle" },
+];
 
 function isVehicleAlreadyRegisteredError(error: any) {
   const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
@@ -38,990 +64,590 @@ function isDuplicateProfilePrimaryKeyError(error: any) {
   return error?.code === "23505" && details.includes("profiles_pkey");
 }
 
-async function checkEmailStatus(email: string) {
-  const response = await fetch(
-    `/auth/callback?action=check-email&email=${encodeURIComponent(email)}`,
-    { method: "GET", cache: "no-store" }
-  );
-
-  if (!response.ok) {
-    throw new Error("Unable to verify this email right now. Please try again.");
-  }
-
-  return (await response.json()) as {
-    exists: boolean;
-    providers: string[];
-    domainAllowed: boolean;
-    blocked: boolean;
-    blockedReason?: string | null;
-  };
-}
-
 function SignupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [step, setStep] = useState(1);
-  const [direction, setDirection] = useState(1);
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+
+  const [formData, setFormData] = useState<SignupFormState>(initialFormState);
   const [signupMode, setSignupMode] = useState<"password" | "magiclink">("password");
-  const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [toastMessage, setToastMessage] = useState("");
+  const [currentStep, setCurrentStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
-  const [mobileToast, setMobileToast] = useState<{ kind: "error" | "success"; message: string } | null>(null);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<SignupFieldErrors>({});
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (searchParams.get("error") === "invalid-domain") {
+    const urlError = searchParams.get("error");
+
+    if (urlError === "invalid-domain") {
       setError(DOMAIN_RESTRICTION_MESSAGE);
-      setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
       router.replace("/signup");
+      return;
     }
-    if (searchParams.get("error") === "blocked-group") {
+
+    if (urlError === "blocked-group") {
       setError(GROUP_EMAIL_BLOCK_MESSAGE);
-      setToastMessage(GROUP_EMAIL_BLOCK_MESSAGE);
       router.replace("/signup");
     }
-  }, [searchParams, router]);
+  }, [router, searchParams]);
 
-  useEffect(() => {
-    if (!toastMessage) return;
-    const timer = window.setTimeout(() => setToastMessage(""), 3200);
-    return () => window.clearTimeout(timer);
-  }, [toastMessage]);
+  const stepMeta = useMemo(() => {
+    if (signupMode === "magiclink") {
+      return {
+        title: "Start with your NIE email",
+        description: "Send the sign-up link to your NIE email.",
+      };
+    }
 
-  useEffect(() => {
-    if (!error) return;
-    setMobileToast({ kind: "error", message: error });
-  }, [error]);
+    if (currentStep === 1) {
+      return {
+        title: "Account",
+        description: "Choose your email and sign-up method.",
+      };
+    }
 
-  // Form State
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
-    userType: "Student" as "Student" | "Faculty",
-    firstName: "",
-    lastName: "",
-    usn: "",
-    batch: "",
-    year: "",
-    phone: "",
-    role: "Day Scholar", // Day Scholar or Hostelite for students, Faculty for faculty users
-    campus: "South Campus",
-    hostelName: "NIE North Boys Hostel",
-    roomNo: "",
-    hasVehicle: "No",
-    vehicleNo: ""
-  });
+    if (currentStep === 2) {
+      return {
+        title: "Profile",
+        description: "Add your basic details.",
+      };
+    }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
+    return {
+      title: "Campus",
+      description: "Add your campus and vehicle details.",
+    };
+  }, [currentStep, signupMode]);
+
+  const clearMessages = () => {
+    setError("");
+    setSuccess("");
+    setFieldErrors({});
+  };
+
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = event.target;
     const nextValue = name === "vehicleNo" ? formatOwnerVehiclePlateInput(value) : value;
-    setFormData(prev => ({ ...prev, [name]: nextValue }));
-    if (error) setError("");
+    setFormData((current) => ({ ...current, [name]: nextValue }));
+    clearMessages();
   };
 
   const handleUserTypeChange = (userType: "Student" | "Faculty") => {
-    setFormData(prev => {
+    setFormData((current) => {
       if (userType === "Faculty") {
         return {
-          ...prev,
+          ...current,
           userType,
           usn: "",
           batch: "",
           year: "",
           role: "Faculty",
           hostelName: "NIE North Boys Hostel",
-          roomNo: ""
+          roomNo: "",
         };
       }
 
       return {
-        ...prev,
+        ...current,
         userType,
-        role: prev.role === "Faculty" ? "Day Scholar" : prev.role
+        role: current.role === "Faculty" ? "Day Scholar" : current.role,
       };
     });
-    if (error) setError("");
+    clearMessages();
   };
 
-  const nextStep = async () => {
-    setError("");
-    // Validation per step
-    if (step === 1) {
-      const normalizedEmail = formData.email.trim().toLowerCase();
-      if (!acceptedPolicies) {
-        setError("Please accept the Terms of Service and Privacy Policy to continue.");
-        return;
-      }
-      if (!normalizedEmail.endsWith("@nie.ac.in")) {
-        setError(DOMAIN_RESTRICTION_MESSAGE);
-        setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
-        return;
-      }
+  const validateAccountStep = () => {
+    const errors: SignupFieldErrors = {};
+    const normalizedEmail = normalizeInstitutionalEmail(formData.email);
 
-      setIsLoading(true);
-      setError("");
-
-      try {
-        const emailStatus = await checkEmailStatus(normalizedEmail);
-        if (!emailStatus.domainAllowed) {
-          setError(DOMAIN_RESTRICTION_MESSAGE);
-          setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
-          return;
-        }
-        if (emailStatus.blocked) {
-          const blockedMessage = emailStatus.blockedReason || GROUP_EMAIL_BLOCK_MESSAGE;
-          setError(blockedMessage);
-          setToastMessage(blockedMessage);
-          return;
-        }
-
-        if (emailStatus.exists) {
-          if (emailStatus.providers?.includes("google")) {
-            setError(
-              "This email already uses Google Sign-In. Use Google to log in, then set a password in Profile to link both methods."
-            );
-          } else {
-            setError("This email is already registered. Please log in instead.");
-          }
-          return;
-        }
-
-        if (signupMode === "password") {
-          if (formData.password.length < 6) {
-            setError("Password must be at least 6 characters.");
-            return;
-          }
-          setFormData((prev) => ({ ...prev, email: normalizedEmail }));
-        } else {
-          // ACCESS LINK SIGNUP FLOW
-          const supabase = createClient();
-          const { error } = await supabase.auth.signInWithOtp({
-            email: normalizedEmail,
-            options: {
-              shouldCreateUser: true,
-              emailRedirectTo: `${window.location.origin}/auth/callback`,
-            },
-          });
-
-          if (error) {
-            if (error.message.toLowerCase().includes("already")) {
-              setError("This email is already registered. Please log in instead.");
-            } else {
-              setError(error.message);
-            }
-          } else {
-            setMagicLinkSent(true);
-          }
-          return;
-        }
-      } catch (err: any) {
-        setError(err.message || "Unable to verify email right now.");
-        return;
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    
-    if (step === 2) {
-      if (!formData.userType || !formData.firstName || !formData.lastName || !formData.phone) {
-        setError("Please fill all required fields.");
-        return;
-      }
-      if (formData.userType === "Student" && (!formData.usn || !formData.batch || !formData.year)) {
-        setError("USN, batch, and year are required for students.");
-        return;
-      }
-      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
-        formData.phone
-      );
-      if (phoneError) {
-        setError(phoneError);
-        return;
-      }
-      setFormData((prev) => ({ ...prev, phone: normalizedPhone }));
+    if (!isAllowedAuthEmail(normalizedEmail)) {
+      errors.email = DOMAIN_RESTRICTION_MESSAGE;
     }
 
-    if (step === 3) {
-      if (formData.userType === "Student" && formData.role === "Hostelite") {
-        if (!formData.roomNo) {
-          setError("Please provide your hostel room number.");
-          return;
-        }
-      } else {
-        if (!formData.campus) {
-          setError("Please select your primary campus.");
-          return;
-        }
-      }
+    if (signupMode === "password" && formData.password.length < 6) {
+      errors.password = "Password must be at least 6 characters long.";
     }
 
-    setError("");
-    setDirection(1);
-    setStep(prev => Math.min(prev + 1, TOTAL_STEPS));
+    if (!acceptedPolicies) {
+      errors.acceptedPolicies = "Please accept the Terms and Privacy Policy before continuing.";
+    }
+
+    return { errors, normalizedEmail };
   };
 
-  const prevStep = () => {
-    setError("");
-    setDirection(-1);
-    setStep(prev => Math.max(prev - 1, 1));
+  const validateProfileStep = () => {
+    const errors: SignupFieldErrors = {};
+
+    if (!formData.firstName.trim()) errors.firstName = "Enter your first name.";
+    if (!formData.lastName.trim()) errors.lastName = "Enter your last name.";
+
+    const { error: phoneError } = validateRequiredPhoneNumber(formData.phone);
+    if (phoneError) errors.phone = phoneError;
+
+    if (formData.userType === "Student") {
+      if (!formData.usn.trim()) errors.usn = "USN is required for students.";
+      if (!formData.batch) errors.batch = "Select your batch or branch.";
+      if (!formData.year) errors.year = "Select your current year.";
+    }
+
+    return errors;
   };
 
-  const handleComplete = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(
-      formData.phone
-    );
-    if (phoneError) {
-      setError(phoneError);
-      return;
-    }
+  const validateCampusStep = () => {
+    const errors: SignupFieldErrors = {};
     const vehicleValidation =
       formData.hasVehicle === "Yes"
         ? validateOwnerVehiclePlate(formData.vehicleNo, { required: true })
         : { plate: "", error: "" };
+
+    if (formData.userType === "Student" && formData.role === "Hostelite") {
+      if (!formData.roomNo.trim()) {
+        errors.roomNo = "Enter your hostel room number.";
+      }
+    } else if (!formData.campus) {
+      errors.campus = "Select your primary campus.";
+    }
+
     if (vehicleValidation.error) {
-      setError(vehicleValidation.error);
+      errors.vehicleNo = vehicleValidation.error;
+    }
+
+    return {
+      errors,
+      normalizedVehicle: vehicleValidation.plate,
+    };
+  };
+
+  const handleGoogleAuth = async () => {
+    clearMessages();
+
+    if (!acceptedPolicies) {
+      setFieldErrors({ acceptedPolicies: "Please accept the Terms and Privacy Policy before continuing." });
+      return;
+    }
+
+    const supabase = createClient();
+    const { error: googleError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?screen=signup&next=/lost-and-found`,
+        queryParams: {
+          prompt: "select_account consent",
+        },
+      },
+    });
+
+    if (googleError) {
+      if (googleError.message.toLowerCase().includes("invalid domain")) {
+        setFieldErrors({ email: DOMAIN_RESTRICTION_MESSAGE });
+      } else {
+        setError(googleError.message);
+      }
+    }
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    clearMessages();
+
+    if (signupMode === "password" && currentStep === 1) {
+      const { errors, normalizedEmail } = validateAccountStep();
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors);
+        return;
+      }
+
+      // Check if account already exists — block at step 1, not at the end
+      setIsLoading(true);
+      try {
+        const emailStatus = await checkAuthEmailStatus(normalizedEmail);
+
+        if (!emailStatus.domainAllowed) {
+          setFieldErrors({ email: DOMAIN_RESTRICTION_MESSAGE });
+          return;
+        }
+        if (emailStatus.blocked) {
+          setFieldErrors({ email: emailStatus.blockedReason || GROUP_EMAIL_BLOCK_MESSAGE });
+          return;
+        }
+        if (emailStatus.exists) {
+          setFieldErrors({
+            email: emailStatus.providers?.includes("google")
+              ? "This email already uses Google sign-in. Use Google on the login page instead."
+              : "This email already has an account. Sign in instead.",
+          });
+          return;
+        }
+      } catch {
+        // If check fails, let user proceed — server will catch duplicates later
+      } finally {
+        setIsLoading(false);
+      }
+
+      setCurrentStep(2);
+      return;
+    }
+
+    if (signupMode === "password" && currentStep === 2) {
+      const errors = validateProfileStep();
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors);
+        return;
+      }
+      setCurrentStep(3);
+      return;
+    }
+
+    const { errors: accountErrors, normalizedEmail } = validateAccountStep();
+    if (Object.keys(accountErrors).length > 0) {
+      setFieldErrors(accountErrors);
+      setCurrentStep(1);
       return;
     }
 
     setIsLoading(true);
-    setError("");
-
     const supabase = createClient();
-    
-    // Step 1: Create Supabase Auth User
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: formData.email,
-      password: formData.password,
-    });
 
-    if (authError) {
-      if (authError.message.toLowerCase().includes("already")) {
-        setError("This email is already registered. Please log in instead.");
-      } else {
-        setError(authError.message);
+    try {
+      // For magiclink, check email existence here (password mode checks at step 1)
+      if (signupMode === "magiclink") {
+        const emailStatus = await checkAuthEmailStatus(normalizedEmail);
+
+        if (!emailStatus.domainAllowed) {
+          setFieldErrors({ email: DOMAIN_RESTRICTION_MESSAGE });
+          return;
+        }
+        if (emailStatus.blocked) {
+          setFieldErrors({ email: emailStatus.blockedReason || GROUP_EMAIL_BLOCK_MESSAGE });
+          return;
+        }
+        if (emailStatus.exists) {
+          setFieldErrors({
+            email: emailStatus.providers?.includes("google")
+              ? "This email already uses Google sign-in. Use Google on the login page instead."
+              : "This email already has an account. Sign in instead.",
+          });
+          return;
+        }
       }
-      setIsLoading(false);
-      return;
-    }
 
-    if (!authData.user) {
-      setError("Failed to create account. Please try again.");
-      setIsLoading(false);
-      return;
-    }
+      if (signupMode === "magiclink") {
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          email: normalizedEmail,
+          options: {
+            shouldCreateUser: true,
+            emailRedirectTo: `${window.location.origin}/auth/callback?screen=signup&next=/lost-and-found`,
+          },
+        });
 
-    if (!authData.session) {
-      setError(
-        "Signup confirmation is enabled in Supabase. Disable 'Confirm email' for instant signup flow."
-      );
-      setIsLoading(false);
-      return;
-    }
+        if (otpError) {
+          if (otpError.message.toLowerCase().includes("already")) {
+            setFieldErrors({ email: "This email already has an account. Sign in instead." });
+          } else {
+            setError(otpError.message);
+          }
+          return;
+        }
 
-    const isStudent = formData.userType === "Student";
-    const normalizedRole = isStudent ? formData.role : "Faculty";
-    const profilePayload = {
-      first_name: formData.firstName,
-      last_name: formData.lastName,
-      user_type: formData.userType,
-      usn: isStudent ? formData.usn.toUpperCase() : null,
-      batch: isStudent ? formData.batch : null,
-      year_of_study: isStudent ? formData.year : null,
-      phone: normalizedPhone,
-      role: normalizedRole,
-      campus: normalizedRole === "Hostelite" ? null : formData.campus,
-      hostel_name: normalizedRole === "Hostelite" ? formData.hostelName : null,
-      room_no: normalizedRole === "Hostelite" ? formData.roomNo : null,
-      has_vehicle: formData.hasVehicle === "Yes",
-      vehicle_no: formData.hasVehicle === "Yes" ? vehicleValidation.plate : null,
-      auth_provider: "email",
-      email_verified: false,
-    };
+        setFormData((current) => ({ ...current, email: normalizedEmail }));
+        setMagicLinkSent(true);
+        setSuccess("A sign-up link has been sent to your NIE email.");
+        return;
+      }
 
-    // Persist profile immediately after signup.
-    const { data: existingProfile } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("id", authData.user.id)
-      .maybeSingle();
+      const profileErrors = validateProfileStep();
+      const { errors: campusErrors, normalizedVehicle } = validateCampusStep();
+      const { normalizedPhone, error: phoneError } = validateRequiredPhoneNumber(formData.phone);
 
-    let profileError: any = null;
+      if (phoneError) {
+        profileErrors.phone = phoneError;
+      }
 
-    if (existingProfile) {
-      const { error } = await supabase
+      const combinedErrors = { ...profileErrors, ...campusErrors };
+      if (Object.keys(combinedErrors).length > 0) {
+        setFieldErrors(combinedErrors);
+        setCurrentStep(Object.keys(profileErrors).length > 0 ? 2 : 3);
+        return;
+      }
+
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password: formData.password,
+      });
+
+      if (authError) {
+        if (authError.message.toLowerCase().includes("already")) {
+          setFieldErrors({ email: "This email already has an account. Sign in instead." });
+          setCurrentStep(1);
+        } else {
+          setError(authError.message);
+        }
+        return;
+      }
+
+      if (!authData.user) {
+        setError("Account could not be created. Please try again.");
+        return;
+      }
+
+      if (!authData.session) {
+        setError("Email confirmation is still enabled in Supabase. Disable it for the instant signup flow.");
+        return;
+      }
+
+      const isStudent = formData.userType === "Student";
+      const normalizedRole = isStudent ? formData.role : "Faculty";
+      const profilePayload = {
+        first_name: formData.firstName.trim(),
+        last_name: formData.lastName.trim(),
+        user_type: formData.userType,
+        usn: isStudent ? formData.usn.trim().toUpperCase() : null,
+        batch: isStudent ? formData.batch : null,
+        year_of_study: isStudent ? formData.year : null,
+        phone: normalizedPhone,
+        role: normalizedRole,
+        campus: normalizedRole === "Hostelite" ? null : formData.campus,
+        hostel_name: normalizedRole === "Hostelite" ? formData.hostelName : null,
+        room_no: normalizedRole === "Hostelite" ? formData.roomNo.trim() : null,
+        has_vehicle: formData.hasVehicle === "Yes",
+        vehicle_no: formData.hasVehicle === "Yes" ? normalizedVehicle : null,
+        auth_provider: "email",
+        email_verified: false,
+      };
+
+      const { data: existingProfile } = await supabase
         .from("profiles")
-        .update(profilePayload)
-        .eq("id", authData.user.id);
-      profileError = error;
-    } else {
-      const { error } = await supabase
-        .from("profiles")
-        .insert([{ id: authData.user.id, ...profilePayload }]);
-      profileError = error;
+        .select("id")
+        .eq("id", authData.user.id)
+        .maybeSingle();
 
-      if (profileError && isDuplicateProfilePrimaryKeyError(profileError)) {
-        const { error: fallbackUpdateError } = await supabase
+      let profileError: any = null;
+
+      if (existingProfile) {
+        const { error: updateError } = await supabase
           .from("profiles")
           .update(profilePayload)
           .eq("id", authData.user.id);
-        profileError = fallbackUpdateError;
-      }
-    }
-
-    if (profileError) {
-      if (isVehicleAlreadyRegisteredError(profileError)) {
-        setError("This vehicle is already registered to another profile.");
+        profileError = updateError;
       } else {
-        setError("Auth succeeded but profile save failed: " + profileError.message);
+        const { error: insertError } = await supabase
+          .from("profiles")
+          .insert([{ id: authData.user.id, ...profilePayload }]);
+        profileError = insertError;
+
+        if (profileError && isDuplicateProfilePrimaryKeyError(profileError)) {
+          const { error: fallbackUpdateError } = await supabase
+            .from("profiles")
+            .update(profilePayload)
+            .eq("id", authData.user.id);
+          profileError = fallbackUpdateError;
+        }
       }
+
+      if (profileError) {
+        if (isVehicleAlreadyRegisteredError(profileError)) {
+          setFieldErrors({ vehicleNo: "This vehicle is already linked to another account." });
+          setCurrentStep(3);
+        } else {
+          setError(`Account created, but profile details could not be saved: ${profileError.message}`);
+        }
+        return;
+      }
+
+      router.push("/lost-and-found");
+    } catch (submitError: any) {
+      setError(submitError.message || "Unable to create the account right now.");
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    // Fully successful registration
-    setIsLoading(false);
-    router.push("/lost-and-found");
-  };
-
-  const handleGoogleAuth = async () => {
-    if (!acceptedPolicies) {
-      setError("Please accept the Terms of Service and Privacy Policy to continue.");
-      return;
-    }
-    setError("");
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        queryParams: {
-          prompt: "select_account consent",
-        },
-      }
-    });
-
-    if (error) {
-      setError(error.message);
-    }
-  };
-
-  const variants = {
-    enter: (direction: number) => ({
-      x: direction > 0 ? 50 : -50,
-      opacity: 0,
-      scale: 0.95
-    }),
-    center: {
-      x: 0,
-      opacity: 1,
-      scale: 1,
-      transition: { duration: 0.4, ease: "easeOut" as any }
-    },
-    exit: (direction: number) => ({
-      x: direction < 0 ? 50 : -50,
-      opacity: 0,
-      scale: 0.95,
-      transition: { duration: 0.3, ease: "easeIn" as any }
-    })
   };
 
   return (
-    <main className="min-h-screen w-full bg-campus-black text-white flex flex-col items-center justify-center relative overflow-hidden selection:bg-accent-blue/30 p-4 pt-28">
-      <MobileToast
-        kind={mobileToast?.kind || "error"}
-        message={mobileToast?.message || ""}
-        open={Boolean(mobileToast?.message)}
-        onClose={() => setMobileToast(null)}
-      />
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: -18 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -18 }}
-            className="fixed top-24 right-4 z-50 hidden rounded-sm border border-red-300/40 bg-red-500/95 px-4 py-3 text-sm text-white shadow-2xl md:block"
-          >
-            {toastMessage}
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* Abstract Backgrounds */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-5xl opacity-30 pointer-events-none">
-        <div className="absolute top-10 left-10 w-96 h-96 bg-accent-blue/20 rounded-full blur-[120px]" />
-        <div className="absolute bottom-10 right-10 w-96 h-96 bg-[#8B5CF6]/20 rounded-full blur-[120px]" />
-      </div>
-
-      <div className="relative z-10 w-full max-w-xl">
-        
-        {/* Header */}
-        <div className="flex flex-col items-center justify-center mb-8">
-          <Link href="/" className="w-14 h-14 bg-white/5 border border-white/10 rounded-full flex items-center justify-center mb-4 shadow-xl hover:bg-white/10 transition-colors">
-            <Image src="/logo.png" alt="Logo" width={32} height={32} className="w-6 h-6 object-contain" />
+    <AuthShell
+      title="Create account"
+      description="Create your NIESync account."
+      size="wide"
+      progress={signupMode === "password" ? { currentStep, totalSteps: 3, label: "Account setup", steps: SIGNUP_STEPS } : undefined}
+      heroTitle="Create your NIESync account"
+      heroDescription="Use your NIE email and finish the steps."
+      heroHighlights={[
+        {
+          title: "NIE email only",
+          description: "Use your `@nie.ac.in` account.",
+        },
+        {
+          title: "3 simple steps",
+          description: "Account, profile, and campus details.",
+        },
+      ]}
+      heroStats={[]}
+      footer={
+        <>
+          Already have an account?{" "}
+          <Link href="/login" className="auth-inline-link font-bold hover:underline">
+            Sign in
           </Link>
-          <h1 className="text-2xl md:text-3xl font-black uppercase tracking-widest text-white">Initialize Profile</h1>
-          <p className="text-text-secondary text-xs font-bold tracking-[0.2em] mt-2">STEP {step} OF {TOTAL_STEPS}</p>
-        </div>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+        {error ? <AuthAlert kind="error">{error}</AuthAlert> : null}
+        {success ? <AuthAlert kind="success">{success}</AuthAlert> : null}
 
-        {/* Progress Bar */}
-        <div className="w-full bg-white/5 h-1.5 mb-10 rounded-full overflow-hidden">
-          <motion.div 
-            className="h-full bg-gradient-to-r from-accent-blue to-cyan-400"
-            initial={{ width: "25%" }}
-            animate={{ width: `${(step / TOTAL_STEPS) * 100}%` }}
-            transition={{ duration: 0.4, ease: "easeInOut" }}
-          />
-        </div>
+        <AuthSection title={stepMeta.title} description={stepMeta.description}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={`${signupMode}-${currentStep}`}
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -14 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="grid gap-4"
+            >
+              {currentStep === 1 ? (
+                <>
+                  <AuthField label="NIE email" htmlFor="signup-email" helper="Only `@nie.ac.in` accounts can create an account here." error={fieldErrors.email}>
+                    <input
+                      id="signup-email"
+                      name="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={handleChange}
+                      onBlur={(event) => setFormData((current) => ({ ...current, email: normalizeInstitutionalEmail(event.target.value) }))}
+                      placeholder="name@nie.ac.in"
+                      autoComplete="username"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      disabled={magicLinkSent}
+                      required
+                      aria-invalid={Boolean(fieldErrors.email)}
+                      className="auth-input focus-ring"
+                    />
+                  </AuthField>
 
-        {/* Card */}
-        <div className="glass-card p-6 md:p-10 rounded-sm border border-white/10 shadow-2xl relative min-h-[420px] flex flex-col">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-accent-blue to-transparent" />
-          
-          <AnimatePresence>
-            {error && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                animate={{ opacity: 1, height: "auto", marginBottom: 20 }}
-                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                className="mb-5 hidden items-start gap-2 rounded-sm border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400 md:flex"
-              >
-                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                <span>{error}</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <div className="flex-1 relative">
-            <AnimatePresence custom={direction} mode="wait">
-              {step === 1 && (
-                <motion.div
-                  key="step1"
-                  custom={direction}
-                  variants={variants}
-                  initial="enter"
-                  animate="center"
-                  exit="exit"
-                  className="flex flex-col gap-6"
-                >
-                  <div className="mb-2">
-                    <h2 className="text-xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
-                      <Lock className="w-5 h-5 text-accent-blue" />
-                      Account Setup
-                    </h2>
-                    <p className="text-sm text-text-secondary mt-1">We require a verified institutional email.</p>
-                  </div>
-                  
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Institutional Email</label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
-                      <input 
-                        type="email" 
-                        name="email"
-                        value={formData.email}
-                        disabled={magicLinkSent}
-                        onChange={handleChange}
-                        onBlur={(event) => {
-                          const normalizedEmail = event.target.value.trim().toLowerCase();
-                          setFormData((prev) => ({ ...prev, email: normalizedEmail }));
-                        }}
-                        placeholder="name.yr@nie.ac.in" 
-                        className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 disabled:opacity-50"
-                        autoComplete="email"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        autoFocus
-                      />
+                  <AuthField label="Sign up method">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button type="button" onClick={() => { setSignupMode("password"); setCurrentStep(1); setMagicLinkSent(false); clearMessages(); }} className={`focus-ring auth-choice ${signupMode === "password" ? "is-active" : ""}`}>Email and password</button>
+                      <button type="button" onClick={() => { setSignupMode("magiclink"); setCurrentStep(1); setMagicLinkSent(false); clearMessages(); }} className={`focus-ring auth-choice ${signupMode === "magiclink" ? "is-active" : ""}`}>Email link</button>
                     </div>
-                  </div>
+                  </AuthField>
 
-                  {!magicLinkSent && (
-                    <AnimatePresence mode="wait">
-                      {signupMode === "password" && (
-                        <motion.div 
-                          key="password-mode"
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="flex flex-col gap-2"
-                        >
-                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex justify-between">
-                            <span>Secure Password</span>
-                            <button type="button" onClick={() => { setSignupMode("magiclink"); setError(""); }} className="text-accent-amber hover:underline tracking-widest uppercase text-[10px]">
-                              Use Access Link?
-                            </button>
-                          </label>
-                          <div className="relative">
-                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
-                            <input 
-                              type={showPassword ? "text" : "password"} 
-                              name="password"
-                              value={formData.password}
-                              onChange={handleChange}
-                              placeholder="********" 
-                              className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-12 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                              autoComplete="new-password"
-                              required={signupMode === "password"}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword((prev) => !prev)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-white transition-colors"
-                              aria-label={showPassword ? "Hide password" : "Show password"}
-                            >
-                              {showPassword ? (
-                                <EyeOff className="w-5 h-5" />
-                              ) : (
-                                <Eye className="w-5 h-5" />
-                              )}
-                            </button>
-                          </div>
-                        </motion.div>
-                      )}
-
-                      {signupMode === "magiclink" && (
-                        <motion.div 
-                          key="magiclink-request"
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="flex flex-col gap-2"
-                        >
-                          <div className="flex justify-end w-full">
-                            <button type="button" onClick={() => { setSignupMode("password"); setError(""); }} className="text-accent-amber hover:underline tracking-widest uppercase text-[10px] font-bold">
-                                Use Password Instead?
-                              </button>
-                          </div>
-                          <div className="flex items-center gap-2 mt-2 text-text-secondary bg-white/5 p-3 rounded-sm border border-white/5">
-                            <AlertCircle className="w-4 h-4 shrink-0 text-accent-amber" />
-                            <span className="text-xs leading-relaxed">We will send a secure NIE Sync Access Link to your institutional inbox. Click it to continue without a password.</span>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                  {signupMode === "password" ? (
+                    <AuthField label="Password" htmlFor="signup-password" error={fieldErrors.password}>
+                      <div className="relative">
+                        <input
+                          id="signup-password"
+                          name="password"
+                          type={showPassword ? "text" : "password"}
+                          value={formData.password}
+                          onChange={handleChange}
+                          placeholder="Minimum 6 characters"
+                          autoComplete="new-password"
+                          required={signupMode === "password"}
+                          aria-invalid={Boolean(fieldErrors.password)}
+                          className="auth-input focus-ring pr-12"
+                        />
+                        <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Hide password" : "Show password"} className="focus-ring absolute right-4 top-1/2 -translate-y-1/2 text-white/55 transition hover:text-white">
+                          {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                        </button>
+                      </div>
+                    </AuthField>
+                  ) : (
+                    <AuthAlert>We&apos;ll send the sign-up link to your NIE email.</AuthAlert>
                   )}
 
-                  {!magicLinkSent && (
-                    <label className="mt-2 flex items-start gap-3 text-xs text-text-secondary leading-relaxed">
-                      <input
-                        type="checkbox"
-                        checked={acceptedPolicies}
-                        onChange={(event) => setAcceptedPolicies(event.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border border-white/20 bg-black/50 accent-accent-blue"
-                      />
+                  <div className="grid gap-2">
+                    <label className="auth-checkbox">
+                      <input type="checkbox" checked={acceptedPolicies} onChange={(event) => { setAcceptedPolicies(event.target.checked); clearMessages(); }} className="auth-checkbox-input" />
                       <span>
                         I agree to the{" "}
-                        <Link href="/terms-of-service" target="_blank" className="text-white hover:underline">
-                          Terms of Service
-                        </Link>{" "}
+                        <Link href="/terms-of-service" className="auth-inline-link font-semibold hover:underline">Terms of Service</Link>{" "}
                         and{" "}
-                        <Link href="/privacy-policy" target="_blank" className="text-white hover:underline">
-                          Privacy Policy
-                        </Link>
-                        .
+                        <Link href="/privacy-policy" className="auth-inline-link font-semibold hover:underline">Privacy Policy</Link>.
                       </span>
                     </label>
-                  )}
-
-                  {magicLinkSent && (
-                    <motion.div 
-                      key="magiclink-sent"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="flex flex-col gap-2"
-                    >
-                      <div className="flex items-start gap-2 text-green-400 bg-green-500/10 p-4 rounded-sm border border-green-500/30">
-                        <Shield className="w-5 h-5 shrink-0 mt-0.5" />
-                        <span className="text-sm font-semibold leading-relaxed">Access Link Sent!<br />Please check your institutional email inbox to continue your identity registration.</span>
-                      </div>
-                      <button type="button" onClick={() => { setMagicLinkSent(false); setError(""); }} className="bg-white/5 hover:bg-white/10 uppercase tracking-widest py-3 mt-4 font-bold text-xs text-text-secondary rounded-sm transition-colors border border-white/10">
-                        Change Email / Resend
-                      </button>
-                    </motion.div>
-                  )}
-
-                  {!magicLinkSent && (
-                    <>
-                      <div className="my-2 flex items-center gap-4">
-                        <div className="h-[1px] flex-1 bg-white/10"></div>
-                        <span className="text-xs font-bold uppercase tracking-widest text-text-secondary">Or Register With</span>
-                        <div className="h-[1px] flex-1 bg-white/10"></div>
-                      </div>
-
-                      <button 
-                        type="button" 
-                        onClick={handleGoogleAuth}
-                        disabled={!acceptedPolicies}
-                        className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white font-semibold py-3.5 rounded-sm transition-colors flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <GoogleMark className="w-5 h-5" />
-                        <span>Google Workplace (@nie.ac.in)</span>
-                      </button>
-                      {!acceptedPolicies && (
-                        <p className="text-[11px] text-accent-amber mt-2">
-                          Accept Terms and Privacy Policy to continue with Google.
-                        </p>
-                      )}
-                    </>
-                  )}
-                </motion.div>
-              )}
-
-              {step === 2 && (
-                <motion.div
-                  key="step2"
-                  custom={direction}
-                  variants={variants}
-                  initial="enter"
-                  animate="center"
-                  exit="exit"
-                  className="flex flex-col gap-5"
-                >
-                  <div className="mb-2">
-                    <h2 className="text-xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
-                      <User className="w-5 h-5 text-accent-blue" />
-                      Identity
-                    </h2>
-                    <p className="text-sm text-text-secondary mt-1">Tell us who you are.</p>
+                    {fieldErrors.acceptedPolicies ? <p className="auth-error-text">{fieldErrors.acceptedPolicies}</p> : null}
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">I am signing up as</label>
-                    <div className="grid grid-cols-2 gap-3 mt-1">
-                      {["Student", "Faculty"].map((type) => (
-                        <div
-                          key={type}
-                          onClick={() => handleUserTypeChange(type as "Student" | "Faculty")}
-                          className={`
-                            cursor-pointer border py-3 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
-                            ${formData.userType === type
-                              ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
-                              : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                            }
-                          `}
-                        >
-                          {type}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">First Name</label>
-                      <input 
-                        type="text" name="firstName" value={formData.firstName} onChange={handleChange} placeholder="John" 
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Last Name</label>
-                      <input 
-                        type="text" name="lastName" value={formData.lastName} onChange={handleChange} placeholder="Doe" 
-                        className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20"
-                      />
-                    </div>
-                  </div>
+                  <div className="auth-or-divider"><span>Or</span></div>
 
-                  {formData.userType === "Student" ? (
-                    <>
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">University Seat Number (USN)</label>
-                        <input
-                          type="text"
-                          name="usn"
-                          value={formData.usn}
-                          onChange={handleChange}
-                          placeholder="4NI20CS000"
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                        />
-                        <p className="text-[10px] text-accent-amber mt-1 flex items-center gap-1 font-bold uppercase tracking-wider"><AlertCircle className="w-3 h-3" /> USN cannot be changed once entered. Please verify carefully.</p>
-                      </div>
+                  <button type="button" onClick={handleGoogleAuth} className="focus-ring auth-secondary-button inline-flex items-center justify-center gap-3 px-5">
+                    <GoogleMark className="h-5 w-5" />
+                    <span>Google Workspace (@nie.ac.in)</span>
+                  </button>
+                </>
+              ) : null}
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="flex flex-col gap-2">
-                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Batch / Branch</label>
-                          <select
-                            name="batch"
-                            value={formData.batch}
-                            onChange={handleChange}
-                            className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
-                          >
-                            <option value="" className="bg-campus-black">Select batch</option>
-                            {BATCH_OPTIONS.map((batch) => (
-                              <option key={batch} value={batch} className="bg-campus-black">
-                                {batch}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Current Year</label>
-                          <select
-                            name="year"
-                            value={formData.year}
-                            onChange={handleChange}
-                            className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
-                          >
-                            <option value="" className="bg-campus-black">Select year</option>
-                            {YEAR_OPTIONS.map((year) => (
-                              <option key={year} value={year} className="bg-campus-black">
-                                {year}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </>
-                  ) : null}
+              {signupMode === "password" && currentStep === 2 ? (
+                <AuthProfileIdentityFields
+                  formData={formData}
+                  fieldErrors={fieldErrors}
+                  onInputChange={handleChange}
+                  onPhoneChange={(value) => { setFormData((current) => ({ ...current, phone: value })); clearMessages(); }}
+                  onPhoneBlur={() => setFormData((current) => ({ ...current, phone: normalizePhoneNumber(current.phone) }))}
+                  onUserTypeChange={handleUserTypeChange}
+                />
+              ) : null}
 
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Phone Number</label>
-                    <PhoneInput
-                      international
-                      defaultCountry="IN"
-                      value={formData.phone}
-                      onChange={(value) => {
-                        setFormData(prev => ({...prev, phone: value || ""}));
-                        if(error) setError("");
-                      }}
-                      onBlur={() => {
-                        setFormData((prev) => ({ ...prev, phone: normalizePhoneNumber(prev.phone) }));
-                      }}
-                      name="phone"
-                      autoComplete="tel"
-                      inputMode="tel"
-                      className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus-within:border-accent-blue/50 transition-colors text-white PhoneInputOverride"
-                    />
-                  </div>
-                </motion.div>
-              )}
+              {signupMode === "password" && currentStep === 3 ? (
+                <AuthCampusFields
+                  formData={formData}
+                  fieldErrors={fieldErrors}
+                  onInputChange={handleChange}
+                  onRoleChange={(role) => { setFormData((current) => ({ ...current, role })); clearMessages(); }}
+                  onVehicleChoice={(value) => { setFormData((current) => ({ ...current, hasVehicle: value })); clearMessages(); }}
+                />
+              ) : null}
+            </motion.div>
+          </AnimatePresence>
 
-              {step === 3 && (
-                <motion.div
-                  key="step3"
-                  custom={direction}
-                  variants={variants}
-                  initial="enter"
-                  animate="center"
-                  exit="exit"
-                  className="flex flex-col gap-6"
-                >
-                  <div className="mb-2">
-                    <h2 className="text-xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
-                      <HomeIcon className="w-5 h-5 text-accent-blue" />
-                      Residency
-                    </h2>
-                    <p className="text-sm text-text-secondary mt-1">Required for lost item retrieval radius metrics.</p>
-                  </div>
-                  
-                  {formData.userType === "Student" ? (
-                    <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Campus Status</label>
-                      <div className="grid grid-cols-2 gap-3 mt-1">
-                        {["Day Scholar", "Hostelite"].map((role) => (
-                          <div
-                            key={role}
-                            onClick={() => setFormData(prev => ({ ...prev, role }))}
-                            className={`
-                              cursor-pointer border py-3 px-2 rounded-sm text-center text-xs font-bold uppercase tracking-widest transition-all duration-200
-                              ${formData.role === role
-                                ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]"
-                                : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                              }
-                            `}
-                          >
-                            {role}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {formData.userType === "Student" && formData.role === "Hostelite" ? (
-                    <div className="flex flex-col gap-4 mt-2">
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Hostel Name</label>
-                        <select 
-                          name="hostelName" value={formData.hostelName} onChange={handleChange} 
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
-                        >
-                          <option value="NIE North Boys Hostel" className="bg-campus-black">NIE North Boys Hostel</option>
-                          <option value="NIE South Boys Hostel" className="bg-campus-black">NIE South Boys Hostel</option>
-                          <option value="NIE Girls Hostel" className="bg-campus-black">NIE Girls Hostel (Yandahalli)</option>
-                          <option value="Other Affiliated Hostel" className="bg-campus-black">Other Affiliated Hostel</option>
-                        </select>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Room Number</label>
-                        <input 
-                          type="text" name="roomNo" value={formData.roomNo} onChange={handleChange} 
-                          placeholder="Ex: 204-B" 
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-4 mt-2">
-                      <div className="flex flex-col gap-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Primary Campus</label>
-                        <select 
-                          name="campus" value={formData.campus} onChange={handleChange} 
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-sm focus:outline-none focus:border-accent-blue/50 transition-colors text-white appearance-none cursor-pointer hover:bg-white/5"
-                        >
-                          <option value="South Campus" className="bg-campus-black">South Campus</option>
-                          <option value="North Campus" className="bg-campus-black">North Campus</option>
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-
-              {step === 4 && (
-                <motion.div
-                  key="step4"
-                  custom={direction}
-                  variants={variants}
-                  initial="enter"
-                  animate="center"
-                  exit="exit"
-                  className="flex flex-col gap-6"
-                >
-                  <div className="mb-2">
-                    <h2 className="text-xl font-bold uppercase tracking-wide text-white flex items-center gap-2">
-                      <Car className="w-5 h-5 text-accent-blue" />
-                      Vehicle Registry
-                    </h2>
-                    <p className="text-sm text-text-secondary mt-1">Vital for Parking Patrol authorization.</p>
-                  </div>
-                  
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Do you drive a vehicle to campus?</label>
-                    <div className="flex gap-4 mt-1">
-                      {["No", "Yes"].map((opt) => (
-                        <div 
-                          key={opt}
-                          onClick={() => setFormData(prev => ({ ...prev, hasVehicle: opt }))}
-                          className={`
-                            cursor-pointer flex-1 border py-4 rounded-sm text-center text-sm font-bold uppercase tracking-widest transition-all duration-200
-                            ${formData.hasVehicle === opt 
-                              ? "bg-accent-blue/20 border-accent-blue text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]" 
-                              : "bg-black/40 border-white/10 text-text-secondary hover:border-white/30"
-                            }
-                          `}
-                        >
-                          {opt}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <AnimatePresence>
-                    {formData.hasVehicle === "Yes" && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="flex flex-col gap-2 mt-2"
-                      >
-                        <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">License Plate Number</label>
-                        <input 
-                          type="text" name="vehicleNo" value={formData.vehicleNo} onChange={handleChange} 
-                          placeholder="KA-09-AB-1234 or 22-BH-1234-AA" 
-                          className="w-full bg-black/40 border border-white/10 rounded-sm p-3.5 text-xl font-mono text-center tracking-widest focus:outline-none focus:border-accent-blue/50 transition-colors text-white placeholder:text-white/20 uppercase"
-                          autoFocus
-                        />
-                        <div className="flex items-center gap-2 mt-2 text-text-secondary bg-white/5 p-3 rounded-sm">
-                          <Info className="w-4 h-4 shrink-0" />
-                          <span className="text-xs leading-relaxed">{getOwnerVehiclePlateFormatsHint()}</span>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Navigation Buttons */}
-          <div className="flex justify-between items-center mt-10 pt-6 border-t border-white/10">
-            {step > 1 ? (
-              <button 
-                onClick={prevStep}
-                className="flex items-center gap-2 text-text-secondary hover:text-white font-bold uppercase tracking-wider text-xs px-4 py-2 transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Return
+          <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
+            {signupMode === "password" && currentStep > 1 ? (
+              <button type="button" onClick={() => { setCurrentStep((value) => value - 1); clearMessages(); }} className="focus-ring auth-secondary-button inline-flex items-center justify-center gap-2 px-5">
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back</span>
               </button>
             ) : (
-              <div /> // Placeholder for space-between
+              <span className="hidden sm:block" />
             )}
 
-            {step < TOTAL_STEPS && !magicLinkSent && (
-              <button 
-                onClick={nextStep}
-                disabled={isLoading || (step === 1 && !acceptedPolicies)}
-                className="bg-white text-campus-black font-black uppercase tracking-widest text-xs px-8 py-3.5 clip-diagonal hover:bg-gray-200 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {isLoading && step === 1 ? (
-                  <span className="w-4 h-4 border-2 border-campus-black/30 border-t-campus-black rounded-full animate-spin"></span>
+            {!magicLinkSent ? (
+              <button type="submit" disabled={isLoading} className="focus-ring auth-primary-button inline-flex items-center justify-center gap-2 px-5">
+                {isLoading ? (
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/25 border-t-white" />
                 ) : (
                   <>
-                    {step === 1 && signupMode === "magiclink" ? "Send Access Link" : "Proceed"}
-                    <ChevronRight className="w-4 h-4" />
+                    <span>
+                      {signupMode === "magiclink"
+                        ? "Send sign-up link"
+                        : currentStep < 3
+                          ? "Continue"
+                          : "Create account"}
+                    </span>
+                    {signupMode === "password" && currentStep === 3 ? <Check className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}
                   </>
                 )}
               </button>
-            )}
-
-            {step === TOTAL_STEPS && !magicLinkSent && (
-              <button 
-                onClick={handleComplete}
-                disabled={isLoading}
-                className="bg-accent-blue text-white font-black uppercase tracking-widest text-xs px-8 py-3.5 clip-diagonal hover:bg-blue-500 transition-colors flex items-center gap-2 shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:shadow-[0_0_30px_rgba(37,99,235,0.6)] disabled:opacity-70 disabled:hover:bg-accent-blue"
-              >
-                {isLoading ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                ) : (
-                  <>
-                    Finalize Registry
-                    <Check className="w-4 h-4" />
-                  </>
-                )}
+            ) : (
+              <button type="button" onClick={() => { setMagicLinkSent(false); setSuccess(""); }} className="focus-ring auth-secondary-button px-5">
+                Use a different email
               </button>
             )}
           </div>
-        </div>
-        
-        <p className="text-center text-text-secondary text-xs mt-8">
-          Already verified? <Link href="/login" className="text-white hover:underline font-bold tracking-wide">ACCESS PORTAL</Link><br/><br/>
-          Need policy details?{" "}
-          <Link href="/terms-of-service" className="text-white hover:underline">
-            Terms
-          </Link>
-          {" "}and{" "}
-          <Link href="/privacy-policy" className="text-white hover:underline">
-            Privacy
-          </Link>
-        </p>
-
-      </div>
-    </main>
+        </AuthSection>
+      </form>
+    </AuthShell>
   );
 }
 
-export default function Signup() {
+export default function SignupPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-campus-black w-full flex items-center justify-center text-white/50 animate-pulse">Loading secure connection...</div>}>
+    <Suspense fallback={<div className="auth-shell flex items-center justify-center text-white/50">Loading sign-up...</div>}>
       <SignupContent />
     </Suspense>
-  )
+  );
 }
-

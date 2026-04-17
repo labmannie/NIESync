@@ -85,6 +85,9 @@ function SkeletonBlock({ className }: { className: string }) {
   return <div className={`skeleton-shimmer rounded-xl ${className}`} aria-hidden="true" />;
 }
 
+const ACTIVE_SESSION_PREVIEW_COUNT = 5;
+const ENDED_SESSION_PREVIEW_COUNT = 5;
+
 export default function SessionsPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -95,6 +98,8 @@ export default function SessionsPage() {
   const [isSessionsLoading, setIsSessionsLoading] = useState(true);
   const [sessionActionId, setSessionActionId] = useState("");
   const [isSigningOutOthers, setIsSigningOutOthers] = useState(false);
+  const [showAllActiveSessions, setShowAllActiveSessions] = useState(false);
+  const [showAllPreviousSessions, setShowAllPreviousSessions] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [mobileToast, setMobileToast] = useState<{
@@ -230,11 +235,17 @@ export default function SessionsPage() {
     }
   };
 
-  const activeSessions = sessions.filter(s => !s.revoked_at);
-  const previousSessions = sessions.filter(s => s.revoked_at).slice(0, 5);
+  const activeSessions = sessions.filter((s) => !s.revoked_at);
+  const previousSessions = sessions.filter((s) => s.revoked_at);
+  const visibleActiveSessions = showAllActiveSessions
+    ? activeSessions
+    : activeSessions.slice(0, ACTIVE_SESSION_PREVIEW_COUNT);
+  const visiblePreviousSessions = showAllPreviousSessions
+    ? previousSessions
+    : previousSessions.slice(0, ENDED_SESSION_PREVIEW_COUNT);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.16),transparent_38%),radial-gradient(circle_at_80%_18%,rgba(255,176,0,0.14),transparent_42%),#050505] px-4 pb-16 pt-32 text-white md:px-8">
+    <main className="campus-app-gradient min-h-screen px-4 pb-16 pt-32 text-white md:px-8">
       <MobileToast
         kind={mobileToast?.kind || "info"}
         message={mobileToast?.message || ""}
@@ -309,7 +320,7 @@ export default function SessionsPage() {
                         No active sessions tracked yet.
                       </p>
                     )}
-                    {activeSessions.map((sessionRow) => {
+                    {visibleActiveSessions.map((sessionRow) => {
                       const isCurrent = sessionRow.session_id === currentSessionId;
                       const deviceLabel = formatSessionDeviceLabel(sessionRow.user_agent);
                       const locationLabel = getSessionLocationLabel(sessionRow);
@@ -354,13 +365,24 @@ export default function SessionsPage() {
                       );
                     })}
                   </div>
+                  {activeSessions.length > ACTIVE_SESSION_PREVIEW_COUNT && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllActiveSessions((current) => !current)}
+                      className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-4 text-[11px] font-black uppercase tracking-[0.14em] text-white/75 transition hover:bg-white/[0.08]"
+                    >
+                      {showAllActiveSessions
+                        ? "Show Less"
+                        : `Show ${activeSessions.length - ACTIVE_SESSION_PREVIEW_COUNT} More`}
+                    </button>
+                  )}
                 </div>
 
                 {previousSessions.length > 0 && (
                   <div>
                     <p className="text-[11px] uppercase tracking-[0.2em] text-text-secondary mb-3">Recently Ended Sessions</p>
                     <div className="space-y-3">
-                      {previousSessions.map((sessionRow) => (
+                      {visiblePreviousSessions.map((sessionRow) => (
                         <div key={sessionRow.id} className="rounded-sm border border-white/10 bg-black/20 p-4 opacity-70">
                           <p className="text-sm text-white/90 font-semibold truncate flex items-center gap-2">
                             {formatSessionDeviceLabel(sessionRow.user_agent).toLowerCase().includes("ios") ? (
@@ -376,6 +398,17 @@ export default function SessionsPage() {
                         </div>
                       ))}
                     </div>
+                    {previousSessions.length > ENDED_SESSION_PREVIEW_COUNT && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllPreviousSessions((current) => !current)}
+                        className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-4 text-[11px] font-black uppercase tracking-[0.14em] text-white/75 transition hover:bg-white/[0.08]"
+                      >
+                        {showAllPreviousSessions
+                          ? "Show Less"
+                          : `Show ${previousSessions.length - ENDED_SESSION_PREVIEW_COUNT} More`}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

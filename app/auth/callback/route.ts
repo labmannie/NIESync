@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/utils/supabase/server";
 import { createSupabaseFetch, getServiceRoleConfig } from "@/utils/supabase/config";
-
-const NIE_DOMAIN_SUFFIX = "@nie.ac.in";
+import { isAllowedAuthEmail, normalizeInstitutionalEmail } from "@/lib/authEmail";
 const GROUP_EMAIL_BLOCK_MESSAGE =
   "Group email addresses are not allowed for individual accounts.";
 
@@ -22,6 +21,10 @@ function getAdminClient() {
   } catch {
     return null;
   }
+}
+
+function getGuestAuthRoute(screen: string | null) {
+  return screen === "login" ? "/login" : "/signup";
 }
 
 async function findBlockedEmailEntry(admin: ReturnType<typeof getAdminClient>, email: string) {
@@ -57,16 +60,17 @@ async function findBlockedEmailEntry(admin: ReturnType<typeof getAdminClient>, e
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const action = searchParams.get("action");
+  const screen = searchParams.get("screen");
 
   // Internal auth utility endpoint: /auth/callback?action=check-email&email=x@nie.ac.in
   if (action === "check-email") {
-    const email = (searchParams.get("email") || "").trim().toLowerCase();
+    const email = normalizeInstitutionalEmail(searchParams.get("email") || "");
 
     if (!email) {
       return NextResponse.json({ error: "Email is required." }, { status: 400 });
     }
 
-    if (!email.endsWith(NIE_DOMAIN_SUFFIX)) {
+    if (!isAllowedAuthEmail(email)) {
       return NextResponse.json({
         exists: false,
         providers: [],
@@ -192,17 +196,17 @@ export async function GET(request: Request) {
       } = await supabase.auth.getUser();
       
       if (user) {
-        const normalizedEmail = String(user.email || "").trim().toLowerCase();
-        if (!normalizedEmail.endsWith(NIE_DOMAIN_SUFFIX)) {
+        const normalizedEmail = normalizeInstitutionalEmail(user.email || "");
+        if (!isAllowedAuthEmail(normalizedEmail)) {
           await supabase.auth.signOut();
-          return NextResponse.redirect(`${origin}/signup?error=invalid-domain`);
+          return NextResponse.redirect(`${origin}${getGuestAuthRoute(screen)}?error=invalid-domain`);
         }
 
         const admin = getAdminClient();
         const blockedStatus = await findBlockedEmailEntry(admin, normalizedEmail);
         if (blockedStatus.blocked) {
           await supabase.auth.signOut();
-          return NextResponse.redirect(`${origin}/signup?error=blocked-group`);
+          return NextResponse.redirect(`${origin}${getGuestAuthRoute(screen)}?error=blocked-group`);
         }
 
         const { data: profile } = await supabase

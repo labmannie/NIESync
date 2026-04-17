@@ -10,6 +10,14 @@ const nextConfig = {
       },
     ],
   },
+  webpack: (config, { isServer }) => {
+    // Suppress "[webpack.cache.PackFileCacheStrategy] Serializing big strings" warning
+    config.infrastructureLogging = {
+      ...config.infrastructureLogging,
+      level: 'error',
+    };
+    return config;
+  },
 };
 
 export default nextConfig;

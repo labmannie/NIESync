@@ -2387,7 +2387,7 @@ export default function ForumPage() {
 
   if (isBooting) {
     return (
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.18),transparent_32%),radial-gradient(circle_at_88%_10%,rgba(255,176,0,0.14),transparent_28%),#050506] px-4 pb-24 pt-24 text-white">
+      <main className="campus-app-gradient min-h-screen px-4 pb-24 pt-24 text-white">
         <div className="mx-auto max-w-[1280px]">
           <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)_320px]">
             <div className="hidden space-y-4 xl:block">
@@ -2494,7 +2494,7 @@ export default function ForumPage() {
   const headerHidden = effectiveHeaderState === "hidden";
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.18),transparent_32%),radial-gradient(circle_at_88%_10%,rgba(255,176,0,0.14),transparent_28%),#050506] px-3 pb-36 pt-20 text-white md:px-4 md:pb-24 md:pt-24">
+    <main className="campus-app-gradient min-h-screen px-3 pb-36 pt-20 text-white md:px-4 md:pb-24 md:pt-24">
       <style jsx global>{forumGlobalStyles}</style>
 
       <MobileToast

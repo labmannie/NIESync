@@ -1,113 +1,121 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Shield, Mail, Lock, AlertCircle, ArrowRight, Eye, EyeOff } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
-import { createClient } from "@/utils/supabase/client";
-import { MobileToast } from "@/components/MobileToast";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
+
+import { AuthAlert } from "@/components/AuthAlert";
+import { AuthField } from "@/components/AuthField";
+import { AuthSection } from "@/components/AuthSection";
+import { AuthShell } from "@/components/AuthShell";
 import { GoogleMark } from "@/app/_components/GoogleMark";
+import { createClient } from "@/utils/supabase/client";
+import {
+  DOMAIN_RESTRICTION_MESSAGE,
+  GROUP_EMAIL_BLOCK_MESSAGE,
+  checkAuthEmailStatus,
+  isAllowedAuthEmail,
+  normalizeInstitutionalEmail,
+} from "@/lib/authEmail";
 
-const DOMAIN_RESTRICTION_MESSAGE = "Access restricted to NIE students and staff only.";
-const GROUP_EMAIL_BLOCK_MESSAGE =
-  "Group email addresses are not allowed for individual accounts.";
-
-async function checkEmailStatus(email: string) {
-  const response = await fetch(
-    `/auth/callback?action=check-email&email=${encodeURIComponent(email)}`,
-    { method: "GET", cache: "no-store" }
-  );
-
-  if (!response.ok) {
-    throw new Error("Unable to verify this email right now. Please try again.");
-  }
-
-  return (await response.json()) as {
-    exists: boolean;
-    providers: string[];
-    domainAllowed: boolean;
-    blocked: boolean;
-    blockedReason?: string | null;
-  };
-}
+type LoginFieldErrors = {
+  email?: string;
+  password?: string;
+};
 
 function LoginContent() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  
-  const [loginMode, setLoginMode] = useState<"password" | "magiclink">("password");
-  const [magicLinkSent, setMagicLinkSent] = useState(false);
-
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [toastMessage, setToastMessage] = useState("");
-  const [mobileToast, setMobileToast] = useState<{ kind: "error" | "success"; message: string } | null>(null);
-  
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [mode, setMode] = useState<"password" | "magiclink">("password");
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<LoginFieldErrors>({});
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
   useEffect(() => {
-    if (searchParams.get("error") === "invalid-domain") {
+    const urlError = searchParams.get("error");
+    const reauth = searchParams.get("reauth");
+    const account = searchParams.get("account");
+    const session = searchParams.get("session");
+    const reset = searchParams.get("reset");
+
+    if (urlError === "invalid-domain") {
       setError(DOMAIN_RESTRICTION_MESSAGE);
-      setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
       router.replace("/login");
+      return;
     }
-    if (searchParams.get("error") === "blocked-group") {
+
+    if (urlError === "blocked-group") {
       setError(GROUP_EMAIL_BLOCK_MESSAGE);
-      setToastMessage(GROUP_EMAIL_BLOCK_MESSAGE);
       router.replace("/login");
+      return;
     }
-    if (searchParams.get("error") === "session-revoked") {
-      setError("This session was signed out from another device. Please log in again.");
+
+    if (urlError === "session-revoked") {
+      setError("This session was signed out on another device. Please sign in again.");
       router.replace("/login");
+      return;
     }
-    if (searchParams.get("reauth") === "delete-account") {
+
+    if (urlError === "auth-callback-failed") {
+      setError("Sign-in could not be completed. Please try again.");
+      router.replace("/login");
+      return;
+    }
+
+    if (reauth === "delete-account") {
       setSuccess("Please sign in again to continue with account deletion.");
       router.replace("/login");
+      return;
     }
-    if (searchParams.get("account") === "deleted") {
-      setSuccess("Your account has been deleted successfully.");
+
+    if (account === "deleted") {
+      setSuccess("Your account has been deleted.");
+      router.replace("/login");
+      return;
+    }
+
+    if (session === "logged-out") {
+      setSuccess("You have been signed out.");
+      router.replace("/login");
+      return;
+    }
+
+    if (reset === "success") {
+      setSuccess("Your password was changed. Sign in with the new password.");
       router.replace("/login");
     }
-    if (searchParams.get("session") === "logged-out") {
-      setSuccess("You have been logged out from this session.");
-      router.replace("/login");
-    }
-    if (searchParams.get("reset") === "success") {
-      setSuccess("Password reset successfully! Sign in with your new password.");
-      router.replace("/login");
-    }
-  }, [searchParams, router]);
+  }, [router, searchParams]);
 
-  useEffect(() => {
-    if (!toastMessage) return;
-    const timer = window.setTimeout(() => setToastMessage(""), 3200);
-    return () => window.clearTimeout(timer);
-  }, [toastMessage]);
-
-  useEffect(() => {
-    if (!error) return;
-    setMobileToast({ kind: "error", message: error });
-  }, [error]);
-
-  useEffect(() => {
-    if (!success) return;
-    setMobileToast({ kind: "success", message: success });
-  }, [success]);
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const clearMessages = () => {
     setError("");
     setSuccess("");
-    
-    const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail.endsWith("@nie.ac.in")) {
-      setError(DOMAIN_RESTRICTION_MESSAGE);
-      setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
+    setFieldErrors({});
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    clearMessages();
+
+    const normalizedEmail = normalizeInstitutionalEmail(email);
+    const nextFieldErrors: LoginFieldErrors = {};
+
+    if (!isAllowedAuthEmail(normalizedEmail)) {
+      nextFieldErrors.email = DOMAIN_RESTRICTION_MESSAGE;
+    }
+
+    if (mode === "password" && password.length < 6) {
+      nextFieldErrors.password = "Enter the password for this account.";
+    }
+
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
       return;
     }
 
@@ -115,345 +123,284 @@ function LoginContent() {
     const supabase = createClient();
 
     try {
-      const emailStatus = await checkEmailStatus(normalizedEmail);
+      const emailStatus = await checkAuthEmailStatus(normalizedEmail);
 
       if (!emailStatus.domainAllowed) {
-        setError(DOMAIN_RESTRICTION_MESSAGE);
-        setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
+        setFieldErrors({ email: DOMAIN_RESTRICTION_MESSAGE });
         return;
       }
 
       if (emailStatus.blocked) {
         const blockedMessage = emailStatus.blockedReason || GROUP_EMAIL_BLOCK_MESSAGE;
-        setError(blockedMessage);
-        setToastMessage(blockedMessage);
+        setFieldErrors({ email: blockedMessage });
         return;
       }
 
       if (!emailStatus.exists) {
-        setError("Account not found. Please sign up first.");
+        setFieldErrors({ email: "No account was found for this email. Create an account first." });
         return;
       }
 
       setEmail(normalizedEmail);
 
-      // ACCESS LINK FLOW
-      if (loginMode === "magiclink" && !magicLinkSent) {
-        const { error } = await supabase.auth.signInWithOtp({
+      if (mode === "magiclink") {
+        const { error: otpError } = await supabase.auth.signInWithOtp({
           email: normalizedEmail,
           options: {
-            shouldCreateUser: false, // Explicitly deny signup from login page
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          }
+            shouldCreateUser: false,
+            emailRedirectTo: `${window.location.origin}/auth/callback?screen=login&next=/lost-and-found`,
+          },
         });
 
-        if (error) {
-          if (error.message.includes("Signups not allowed")) {
-            setError("Account not found. Please request access (Sign Up) first.");
+        if (otpError) {
+          if (otpError.message.includes("Signups not allowed")) {
+            setFieldErrors({ email: "No account was found for this email. Create an account first." });
           } else {
-            setError(error.message);
+            setError(otpError.message);
           }
-        } else {
-          setSuccess("Access Link sent! Check your institutional email inbox to securely sign in without a password.");
-          setMagicLinkSent(true);
+          return;
         }
+
+        setMagicLinkSent(true);
+        setSuccess("A sign-in link has been sent to your NIE email.");
         return;
       }
 
-      // PASSWORD FLOW
-      if (password.length < 6) {
-        setError("Invalid credentials. Password must be at least 6 characters.");
-        return;
-      }
-
-      // Attempt Sign In
-      const { error } = await supabase.auth.signInWithPassword({
+      const { error: loginError } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
         password,
       });
 
-      if (error) {
-        // Identity Header check heuristic
-        // Supabase returns standard "Invalid login credentials" if password fails or if it's purely an OAuth account.
-        if (error.message.includes("Invalid login credentials")) {
-          setError("Invalid credentials. If you previously registered using Google Workspace or an Access Link, please use that method instead.");
+      if (loginError) {
+        if (loginError.message.includes("Invalid login credentials")) {
+          setFieldErrors({
+            password:
+              "Email or password is incorrect. If this account uses Google, sign in with Google instead.",
+          });
         } else {
-          setError(error.message);
+          setError(loginError.message);
         }
         return;
       }
 
-      // Success redirect
       router.push("/lost-and-found");
-    } catch (err: any) {
-      setError(err.message || "Unable to verify email right now.");
+    } catch (submitError: any) {
+      setError(submitError.message || "Unable to sign in right now. Please try again.");
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleGoogleAuth = async () => {
-    setError("");
+    clearMessages();
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
+
+    const { error: googleError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?screen=login&next=/lost-and-found`,
         queryParams: {
           prompt: "select_account consent",
         },
-      }
+      },
     });
 
-    if (error) {
-      if (error.message.toLowerCase().includes("invalid domain")) {
-        setError(DOMAIN_RESTRICTION_MESSAGE);
-        setToastMessage(DOMAIN_RESTRICTION_MESSAGE);
+    if (googleError) {
+      if (googleError.message.toLowerCase().includes("invalid domain")) {
+        setFieldErrors({ email: DOMAIN_RESTRICTION_MESSAGE });
       } else {
-        setError(error.message);
+        setError(googleError.message);
       }
     }
   };
 
   return (
-    <main className="min-h-screen w-full bg-campus-black text-white flex items-center justify-center relative overflow-hidden selection:bg-accent-amber/30 p-4 pt-28">
-      <MobileToast
-        kind={mobileToast?.kind || "error"}
-        message={mobileToast?.message || ""}
-        open={Boolean(mobileToast?.message)}
-        onClose={() => setMobileToast(null)}
-      />
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: -18 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -18 }}
-            className="fixed top-24 right-4 z-50 hidden rounded-sm border border-red-300/40 bg-red-500/95 px-4 py-3 text-sm text-white shadow-2xl md:block"
-          >
-            {toastMessage}
-          </motion.div>
-        )}
-      </AnimatePresence>
-      
-      {/* Abstract Background */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-4xl opacity-40 pointer-events-none">
-        <div className="absolute top-0 right-1/4 w-96 h-96 bg-accent-amber/10 rounded-full blur-[100px]" />
-        <div className="absolute bottom-0 left-1/4 w-96 h-96 bg-accent-blue/10 rounded-full blur-[100px]" />
-      </div>
-
-      <div className="relative z-10 w-full max-w-lg">
-        {/* Logo Header */}
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col items-center justify-center mb-10"
-        >
-          <Link href="/" className="w-16 h-16 bg-white/5 border border-white/10 rounded-full flex items-center justify-center mb-6 shadow-xl hover:bg-white/10 transition-colors">
-            <Image src="/logo.png" alt="Logo" width={40} height={40} className="w-8 h-8 object-contain" />
+    <AuthShell
+      title="Sign in"
+      description="Use your NIE email to sign in."
+      heroTitle="Sign in to NIESync"
+      heroDescription="Use your NIE account to continue."
+      heroHighlights={[
+        {
+          title: "NIE accounts only",
+          description: "Sign in with your `@nie.ac.in` account.",
+        },
+        {
+          title: "Choose one method",
+          description: "Use your password, email link, or Google Workspace.",
+        },
+      ]}
+      footer={
+        <>
+          Don&apos;t have an account?{" "}
+          <Link href="/signup" className="auth-inline-link font-bold hover:underline">
+            Create one
           </Link>
-          <h1 className="text-3xl font-bold uppercase tracking-widest text-white mb-2">Campus Sync</h1>
-          <p className="text-text-secondary text-sm font-medium tracking-wide">SECURE INSTITUTIONAL ACCESS</p>
-        </motion.div>
+          <span className="mx-2 text-white/28">|</span>
+          <Link href="/terms-of-service" className="hover:text-white hover:underline">
+            Terms
+          </Link>
+          <span className="mx-2 text-white/28">|</span>
+          <Link href="/privacy-policy" className="hover:text-white hover:underline">
+            Privacy
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+        {error ? <AuthAlert kind="error">{error}</AuthAlert> : null}
+        {success ? <AuthAlert kind="success">{success}</AuthAlert> : null}
 
-        {/* Login Card */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="glass-card p-8 md:p-10 rounded-sm border border-white/10 shadow-2xl relative"
+        <AuthSection
+          title="Sign in"
+          description="Choose how you want to sign in."
         >
-          {/* Top border highlight */}
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-accent-amber to-transparent"></div>
+          <AuthField
+            label="NIE email"
+            htmlFor="login-email"
+            helper="Only `@nie.ac.in` accounts are allowed."
+            error={fieldErrors.email}
+          >
+            <input
+              id="login-email"
+              name="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              onBlur={(event) => setEmail(normalizeInstitutionalEmail(event.target.value))}
+              placeholder="name@nie.ac.in"
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              disabled={magicLinkSent}
+              required
+              aria-invalid={Boolean(fieldErrors.email)}
+              className="auth-input focus-ring"
+            />
+          </AuthField>
 
-          <form onSubmit={handleLogin} className="flex flex-col gap-6">
-            
-            <AnimatePresence>
-              {error && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="hidden items-start gap-2 rounded-sm border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400 md:flex"
-                >
-                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>{error}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <AnimatePresence>
-              {success && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="hidden items-start gap-2 rounded-sm border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-400 md:flex"
-                >
-                  <Shield className="w-4 h-4 mt-0.5 shrink-0" />
-                  <span>{success}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Email Field */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-text-secondary">Institutional Email</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
-                <input 
-                  type="email" 
-                  value={email}
-                  disabled={magicLinkSent}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onBlur={(event) => setEmail(event.target.value.trim().toLowerCase())}
-                  placeholder="name.yr@nie.ac.in" 
-                  className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20 disabled:opacity-50"
-                  autoComplete="email"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Dynamic Auth Method Toggles */}
-            <AnimatePresence mode="wait">
-              {loginMode === "password" && !magicLinkSent && (
-                <motion.div 
-                  key="password-mode"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="flex flex-col gap-2"
-                >
-                  <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex justify-between">
-                    <span>Secure Password</span>
-                    <button type="button" onClick={() => { setLoginMode("magiclink"); setError(""); }} className="text-accent-amber hover:underline tracking-widest uppercase text-[10px]">
-                      Use Access Link?
-                    </button>
-                  </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary" />
-                    <input 
-                      type={showPassword ? "text" : "password"} 
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="********" 
-                      className="w-full bg-black/40 border border-white/10 rounded-sm py-3.5 pl-11 pr-12 text-sm focus:outline-none focus:border-accent-amber/50 transition-colors text-white placeholder:text-white/20"
-                      autoComplete="current-password"
-                      required={loginMode === "password"}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-white transition-colors"
-                      aria-label={showPassword ? "Hide password" : "Show password"}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="w-5 h-5" />
-                      ) : (
-                        <Eye className="w-5 h-5" />
-                      )}
-                    </button>
-                  </div>
-                  <div className="flex justify-end mt-1">
-                    <Link href="/forgot-password" className="text-accent-amber/80 hover:text-accent-amber hover:underline text-[11px] font-bold uppercase tracking-wider transition-colors">
-                      Forgot Password?
-                    </Link>
-                  </div>
-                </motion.div>
-              )}
-
-              {loginMode === "magiclink" && !magicLinkSent && (
-                <motion.div 
-                  key="magiclink-request"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="flex flex-col gap-2"
-                >
-                  <div className="flex justify-end w-full">
-                     <button type="button" onClick={() => { setLoginMode("password"); setError(""); }} className="text-accent-amber hover:underline tracking-widest uppercase text-[10px] font-bold">
-                        Use Password Instead?
-                      </button>
-                  </div>
-                  <div className="flex items-center gap-2 mt-2 text-text-secondary bg-white/5 p-3 rounded-sm border border-white/5">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-accent-amber" />
-                    <span className="text-xs leading-relaxed">We will send a secure NIE Sync Access Link to your institutional inbox. Click it to sign in without a password.</span>
-                  </div>
-                </motion.div>
-              )}
-
-              {magicLinkSent && (
-                <motion.div 
-                  key="magiclink-sent"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="flex flex-col gap-2"
-                >
-                  <button type="button" onClick={() => { setMagicLinkSent(false); setSuccess(""); }} className="bg-white/5 hover:bg-white/10 uppercase tracking-widest py-3 font-bold text-xs text-text-secondary rounded-sm transition-colors border border-white/10">
-                    Change Email / Resend
-                  </button>
-                </motion.div>
-              )}
-
-            </AnimatePresence>
-
-            {!magicLinkSent && (
-              <button 
-                type="submit" 
-                disabled={isLoading}
-                className="mt-2 bg-accent-amber text-campus-black font-bold uppercase tracking-widest text-sm py-4 clip-diagonal hover:bg-[#FFC133] transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-70"
+          <AuthField label="Sign in method">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("password");
+                  setMagicLinkSent(false);
+                  clearMessages();
+                }}
+                className={`focus-ring auth-choice ${mode === "password" ? "is-active" : ""}`}
+                aria-pressed={mode === "password"}
               >
-                {isLoading ? (
-                  <span className="w-5 h-5 border-2 border-campus-black/30 border-t-campus-black rounded-full animate-spin"></span>
-                ) : (
-                  <>
-                    <span>{loginMode === "magiclink" ? "Send Access Link" : "Authenticate"}</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
+                Password
               </button>
-            )}
-          </form>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("magiclink");
+                  setMagicLinkSent(false);
+                  clearMessages();
+                }}
+                className={`focus-ring auth-choice ${mode === "magiclink" ? "is-active" : ""}`}
+                aria-pressed={mode === "magiclink"}
+              >
+                Email link
+              </button>
+            </div>
+          </AuthField>
 
-          <div className="my-8 flex items-center gap-4">
-            <div className="h-[1px] flex-1 bg-white/10"></div>
-            <span className="text-xs font-bold uppercase tracking-widest text-text-secondary">Or Continue With</span>
-            <div className="h-[1px] flex-1 bg-white/10"></div>
+          {mode === "password" ? (
+            <AuthField
+              label="Password"
+              htmlFor="current-password"
+              error={fieldErrors.password}
+              labelTrailing={
+                <Link href="/forgot-password" className="auth-inline-link text-sm font-semibold hover:underline">
+                  Forgot password?
+                </Link>
+              }
+            >
+              <div className="relative">
+                <input
+                  id="current-password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                  required={mode === "password"}
+                  aria-invalid={Boolean(fieldErrors.password)}
+                  className="auth-input focus-ring pr-12"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="focus-ring absolute right-4 top-1/2 -translate-y-1/2 text-white/55 transition hover:text-white"
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
+            </AuthField>
+          ) : (
+            <AuthAlert>
+              We&apos;ll send a sign-in link to your NIE email.
+            </AuthAlert>
+          )}
+
+          {!magicLinkSent ? (
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="focus-ring auth-primary-button inline-flex items-center justify-center gap-2 px-5"
+            >
+              {isLoading ? (
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/25 border-t-white" />
+              ) : (
+                <>
+                  <span>{mode === "password" ? "Continue" : "Send sign-in link"}</span>
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setMagicLinkSent(false);
+                setSuccess("");
+              }}
+              className="focus-ring auth-secondary-button px-5"
+            >
+              Use a different email
+            </button>
+          )}
+
+          <div className="auth-or-divider">
+            <span>Or</span>
           </div>
 
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={handleGoogleAuth}
-            className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white font-semibold py-3.5 rounded-sm transition-colors flex items-center justify-center gap-3"
+            className="focus-ring auth-secondary-button inline-flex items-center justify-center gap-3 px-5"
           >
-            <GoogleMark className="w-5 h-5" />
-            <span>Google Workplace (@nie.ac.in)</span>
+            <GoogleMark className="h-5 w-5" />
+            <span>Google Workspace (@nie.ac.in)</span>
           </button>
-        </motion.div>
-
-        <p className="text-center text-text-secondary text-xs mt-8">
-          Don't have an account? <Link href="/signup" className="text-accent-amber hover:underline font-bold tracking-wide">CREATE AN ACCOUNT</Link><br/><br/>
-          By authenticating, you agree to the NIE Sync{" "}
-          <Link href="/terms-of-service" className="text-white hover:underline">Terms of Service</Link>{" "}
-          and{" "}
-          <Link href="/privacy-policy" className="text-white hover:underline">Privacy Policy</Link>.
-        </p>
-
-      </div>
-    </main>
+        </AuthSection>
+      </form>
+    </AuthShell>
   );
 }
 
-export default function Login() {
+export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-campus-black w-full flex items-center justify-center text-white/50 animate-pulse">Loading secure connection...</div>}>
+    <Suspense
+      fallback={<div className="auth-shell flex items-center justify-center text-white/50">Loading sign-in...</div>}
+    >
       <LoginContent />
     </Suspense>
-  )
+  );
 }
-

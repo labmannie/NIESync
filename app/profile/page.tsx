@@ -19,7 +19,6 @@ import { MobileToast } from "@/components/MobileToast";
 import ImageCropper from "@/components/ImageCropper";
 import { normalizePhoneNumber, validateRequiredPhoneNumber } from "@/lib/phone";
 import PhoneInput from "react-phone-number-input";
-import "react-phone-number-input/style.css";
 
 type ProfileRow = {
   id: string;

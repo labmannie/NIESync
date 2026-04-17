@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { shouldHideGlobalChrome } from "@/lib/authRoutes";
 
 type OwnerReportBannerRow = {
   id: string;
@@ -15,14 +16,6 @@ type OwnerReportBannerRow = {
   created_at: string;
   email_sent_at: string | null;
 };
-
-const HIDDEN_ROUTES = [
-  "/login",
-  "/signup",
-  "/signup/complete",
-  "/forgot-password",
-  "/reset-password",
-];
 
 function formatCountdown(createdAt: string, nowMs: number) {
   const createdMs = new Date(createdAt).getTime();
@@ -173,9 +166,8 @@ export function ParkingOwnerBanner() {
   const synchronizedNowMs = currentTimeMs + serverClockOffsetMs;
 
   if (!pathname) return null;
-  if (pathname.startsWith("/auth") || pathname.startsWith("/resolve")) return null;
+  if (shouldHideGlobalChrome(pathname) || pathname.startsWith("/resolve")) return null;
   if (pathname.startsWith("/profile/reports")) return null;
-  if (HIDDEN_ROUTES.includes(pathname)) return null;
   if (!activeReport) return null;
 
   const canAcknowledge =

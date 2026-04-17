@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
 import { resolveClientUser } from "@/utils/supabase/authClient";
+import { shouldHideGlobalChrome } from "@/lib/authRoutes";
 
 type NavbarProfile = {
   id: string;
@@ -300,7 +301,7 @@ export function Navbar() {
   const displayName = resolveProfileDisplayName(profile);
   const initials = resolveProfileInitials(profile);
 
-  if (pathname === "/login") return null;
+  if (shouldHideGlobalChrome(pathname)) return null;
 
   return (
     <>

@@ -36,6 +36,10 @@ function isPublicRoute(pathname: string) {
   return publicPrefixes.some((prefix) => pathname.startsWith(prefix));
 }
 
+function isGuestOnlyRoute(pathname: string) {
+  return pathname === "/login" || pathname === "/signup";
+}
+
 function copySupabaseCookies(source: NextResponse, target: NextResponse) {
   source.cookies.getAll().forEach((cookie) => {
     target.cookies.set(cookie.name, cookie.value);
@@ -67,13 +71,15 @@ function isTransientAuthError(message: string) {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const guestOnlyRoute = isGuestOnlyRoute(pathname);
+  const publicRoute = isPublicRoute(pathname);
 
   const isPrefetch =
     request.headers.get("x-middleware-prefetch") === "1" ||
     request.headers.get("next-router-prefetch") === "1" ||
     request.headers.get("purpose") === "prefetch";
 
-  if (isPrefetch || pathname.startsWith("/api") || isPublicRoute(pathname)) {
+  if (isPrefetch || pathname.startsWith("/api") || (publicRoute && !guestOnlyRoute)) {
     return NextResponse.next({
       request: {
         headers: request.headers,
@@ -158,6 +164,10 @@ export async function middleware(request: NextRequest) {
   }
 
   if (!user) {
+    if (guestOnlyRoute) {
+      return supabaseResponse;
+    }
+
     const authCookiePresent = hasSupabaseAuthCookie(request);
     if (authCookiePresent && authLookupHadTransientFailure) {
       return supabaseResponse;
@@ -168,6 +178,75 @@ export async function middleware(request: NextRequest) {
     const redirectResponse = NextResponse.redirect(redirectUrl);
     copySupabaseCookies(supabaseResponse, redirectResponse);
     return redirectResponse;
+  }
+
+  if (guestOnlyRoute) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/lost-and-found";
+    const redirectResponse = NextResponse.redirect(redirectUrl);
+    copySupabaseCookies(supabaseResponse, redirectResponse);
+    return redirectResponse;
+  }
+
+  // --- Profile completeness gate ---
+  // Allow the completion page itself and auth routes through without checking.
+  const isCompletionRoute = pathname === "/signup/complete";
+  if (!isCompletionRoute) {
+    try {
+      const { data: profile } = await withTimeout(
+        supabase
+          .from("profiles")
+          .select("id, user_type, role, usn, has_vehicle, vehicle_no")
+          .eq("id", user.id)
+          .maybeSingle(),
+        3000,
+        "profile lookup"
+      );
+
+      if (!profile) {
+        // No profile row at all → must complete signup
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = "/signup/complete";
+        const redirectResponse = NextResponse.redirect(redirectUrl);
+        copySupabaseCookies(supabaseResponse, redirectResponse);
+        return redirectResponse;
+      }
+
+      const resolvedUserType =
+        profile.user_type || (profile.role === "Faculty" ? "Faculty" : "Student");
+
+      const studentNeedsUsn =
+        resolvedUserType === "Student" &&
+        (!profile.usn || !String(profile.usn).trim());
+
+      let hasAnyVehicle = !!profile.vehicle_no;
+      if (profile.has_vehicle && !hasAnyVehicle) {
+        try {
+          const { count } = await withTimeout(
+            supabase
+              .from("profile_vehicles")
+              .select("id", { count: "exact", head: true })
+              .eq("profile_id", user.id),
+            2000,
+            "vehicle lookup"
+          );
+          hasAnyVehicle = (count || 0) > 0;
+        } catch {
+          // If vehicle lookup fails, don't block — let them through
+          hasAnyVehicle = true;
+        }
+      }
+
+      if (studentNeedsUsn || (profile.has_vehicle && !hasAnyVehicle)) {
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = "/signup/complete";
+        const redirectResponse = NextResponse.redirect(redirectUrl);
+        copySupabaseCookies(supabaseResponse, redirectResponse);
+        return redirectResponse;
+      }
+    } catch {
+      // If profile lookup fails (timeout, network), don't block navigation
+    }
   }
 
   // Session-device tracking runs in background and never blocks navigation.
@@ -249,6 +328,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|icon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

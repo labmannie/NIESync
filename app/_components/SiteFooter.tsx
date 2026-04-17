@@ -4,14 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Github, Instagram, Linkedin, Twitter } from "lucide-react";
 import Image from "next/image";
-
-const FOOTER_HIDDEN_ROUTES = [
-  "/login",
-  "/signup",
-  "/signup/complete",
-  "/forgot-password",
-  "/reset-password",
-];
+import { shouldHideGlobalChrome } from "@/lib/authRoutes";
 
 const PRODUCT_LINKS = [
   { name: "Lost & Found", href: "/lost-and-found" },
@@ -68,10 +61,7 @@ export function SiteFooter() {
   const pathname = usePathname();
 
   if (!pathname) return null;
-  if (
-    FOOTER_HIDDEN_ROUTES.includes(pathname) ||
-    pathname.startsWith("/auth")
-  ) {
+  if (shouldHideGlobalChrome(pathname)) {
     return null;
   }
 

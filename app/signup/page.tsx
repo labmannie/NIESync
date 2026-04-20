@@ -54,6 +54,21 @@ const SIGNUP_STEPS = [
   { label: "Campus", detail: "Stay and vehicle" },
 ];
 
+const SIGNUP_LOADING_MESSAGES = [
+  {
+    title: "Creating your account",
+    description: "Securing your NIE credentials and getting everything ready.",
+  },
+  {
+    title: "Setting up your profile",
+    description: "Saving your campus details so your account is personalized.",
+  },
+  {
+    title: "Preparing your dashboard",
+    description: "Final checks in progress. You will be redirected in a moment.",
+  },
+] as const;
+
 function isVehicleAlreadyRegisteredError(error: any) {
   const details = `${error?.code || ""} ${error?.message || ""} ${error?.details || ""} ${error?.constraint || ""}`.toLowerCase();
   return error?.code === "23505" && details.includes("vehicle");
@@ -78,6 +93,8 @@ function SignupContent() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isFinalizingSignup, setIsFinalizingSignup] = useState(false);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
 
   useEffect(() => {
     const urlError = searchParams.get("error");
@@ -93,6 +110,19 @@ function SignupContent() {
       router.replace("/signup");
     }
   }, [router, searchParams]);
+
+  useEffect(() => {
+    if (!isFinalizingSignup) {
+      setLoadingMessageIndex(0);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setLoadingMessageIndex((value) => (value + 1) % SIGNUP_LOADING_MESSAGES.length);
+    }, 1600);
+
+    return () => window.clearInterval(intervalId);
+  }, [isFinalizingSignup]);
 
   const stepMeta = useMemo(() => {
     if (signupMode === "magiclink") {
@@ -373,6 +403,7 @@ function SignupContent() {
         return;
       }
 
+      setIsFinalizingSignup(true);
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: normalizedEmail,
         password: formData.password,
@@ -457,10 +488,14 @@ function SignupContent() {
         return;
       }
 
+      // Fire-and-forget welcome email - never blocks navigation
+      void fetch("/api/welcome-email", { method: "POST" }).catch(() => {});
+
       router.push("/lost-and-found");
     } catch (submitError: any) {
       setError(submitError.message || "Unable to create the account right now.");
     } finally {
+      setIsFinalizingSignup(false);
       setIsLoading(false);
     }
   };
@@ -493,7 +528,7 @@ function SignupContent() {
         </>
       }
     >
-      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-6" aria-busy={isFinalizingSignup}>
         {error ? <AuthAlert kind="error">{error}</AuthAlert> : null}
         {success ? <AuthAlert kind="success">{success}</AuthAlert> : null}
 
@@ -640,6 +675,89 @@ function SignupContent() {
           </div>
         </AuthSection>
       </form>
+
+      <AnimatePresence>
+        {isFinalizingSignup ? (
+          <motion.div
+            key="signup-finalizing-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-[#04070f]/92 px-4 backdrop-blur-md"
+            role="status"
+            aria-live="polite"
+            aria-label="Setting up your account"
+          >
+            <div className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/15 bg-gradient-to-b from-[#121b30] via-[#0f1728] to-[#090f1f] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.55)] sm:p-8">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.24),_transparent_58%)]" />
+              <div className="pointer-events-none absolute -right-14 top-[-60px] h-40 w-40 rounded-full bg-[#ffb000]/20 blur-3xl" />
+
+              <div className="relative space-y-6">
+                <div className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-white/72">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-300" aria-hidden="true" />
+                  Account setup in progress
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="relative h-12 w-12 shrink-0">
+                    <span className="absolute inset-0 animate-spin rounded-full border-2 border-white/20 border-t-[#60a5fa]" />
+                    <span className="absolute inset-[7px] rounded-full border border-white/20" />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={loadingMessageIndex}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.2, ease: "easeOut" }}
+                        className="space-y-1"
+                      >
+                        <p className="text-xl font-black tracking-tight text-white sm:text-2xl">
+                          {SIGNUP_LOADING_MESSAGES[loadingMessageIndex].title}
+                        </p>
+                        <p className="text-sm leading-6 text-white/70">
+                          {SIGNUP_LOADING_MESSAGES[loadingMessageIndex].description}
+                        </p>
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {SIGNUP_LOADING_MESSAGES.map((item, index) => {
+                    const isCurrent = index === loadingMessageIndex;
+                    const isDone = index < loadingMessageIndex;
+
+                    return (
+                      <div
+                        key={item.title}
+                        className={`flex items-center gap-3 rounded-xl border px-3 py-2 text-sm transition ${
+                          isCurrent
+                            ? "border-blue-300/45 bg-blue-500/12 text-white"
+                            : isDone
+                              ? "border-emerald-300/28 bg-emerald-500/10 text-white/82"
+                              : "border-white/10 bg-white/[0.03] text-white/56"
+                        }`}
+                      >
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${
+                            isCurrent ? "animate-pulse bg-blue-300" : isDone ? "bg-emerald-300" : "bg-white/28"
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <span>{item.title}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </AuthShell>
   );
 }

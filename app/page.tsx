@@ -103,63 +103,6 @@ function HeroContent() {
   );
 }
 
-function ParkingCard() {
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: -30 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.8, delay: 0.2 }}
-      className="glass-card shine-effect w-full lg:w-[420px] p-6 rounded-sm relative group cursor-pointer hover:border-white/40 transition-all duration-500 z-10"
-    >
-      <div className="flex justify-between items-start mb-6">
-        <h3 className="text-white font-bold text-xs uppercase tracking-[0.15em]">Recent Violation</h3>
-        <div className="flex items-center gap-2 bg-green-500/20 px-3 py-1.5 rounded-full border border-green-500/30">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse relative"></span>
-          <span className="text-green-400 text-[10px] font-black uppercase tracking-widest">Active Report</span>
-        </div>
-      </div>
-
-      <div className="bg-campus-black/80 border border-white/10 rounded-sm flex items-center p-4 gap-5 group-hover:bg-campus-black transition-colors">
-        <div className="w-[84px] h-[52px] bg-white/10 rounded-sm flex items-center justify-center overflow-hidden relative border border-white/10">
-          <div className="absolute inset-0 bg-white/5 backdrop-blur-md" />
-          <span className="text-white/90 font-mono text-sm z-10 font-bold tracking-[0.2em] blur-[2px] select-none group-hover:blur-0 transition-all duration-300">KA09***</span>
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-white text-sm font-bold tracking-wide">Reserved Parking</span>
-          <span className="text-text-secondary text-xs font-medium uppercase tracking-wider">Lot B • 2 mins ago</span>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function LostFoundCard() {
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: 30 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.8, delay: 0.4 }}
-      className="glass-card shine-effect w-full lg:w-[360px] p-6 rounded-sm relative group cursor-pointer hover:border-white/40 transition-all duration-500 lg:-ml-12 z-20 lg:mb-6 lg:shadow-[-30px_0_50px_-10px_rgba(0,0,0,0.8)]"
-    >
-      <div className="flex justify-between items-start mb-6">
-        <h3 className="text-white font-bold text-xs uppercase tracking-[0.15em]">Recently Found</h3>
-      </div>
-
-      <div className="flex items-center justify-between mt-2">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-white/10 to-white/5 border border-white/20 rounded-full flex items-center justify-center text-white shadow-inner group-hover:text-accent-blue transition-colors">
-            <Key className="w-5 h-5" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-white text-sm font-bold tracking-wide">Car Keys (Honda)</span>
-            <span className="text-text-secondary text-xs font-medium uppercase tracking-wider">Lib Gate • Found</span>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
 function ExpandedContent() {
   const router = useRouter();
 
@@ -357,12 +300,6 @@ export default function Home() {
         {/* Hero Content Wrapper */}
         <div className="relative z-10 flex flex-col flex-grow px-8 md:px-16 pb-8 max-w-[1920px] mx-auto w-full">
           <HeroContent />
-
-          {/* Liquid Glass Widgets (Bottom area) */}
-          <div className="w-full mt-auto pt-16 flex flex-col lg:flex-row gap-6 lg:items-end pb-12 relative z-20">
-            <ParkingCard />
-            <LostFoundCard />
-          </div>
         </div>
       </div>
 

@@ -52,6 +52,7 @@ type Report = {
   additional_details: string;
   status: "active" | "resolved";
   is_deleted: boolean;
+  share_name: boolean;
   created_at: string;
 };
 
@@ -81,6 +82,7 @@ export default function LostAndFound() {
   const [details, setDetails] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
+  const [shareName, setShareName] = useState(true);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -120,7 +122,7 @@ export default function LostAndFound() {
     if (userId) {
       const { data: rClaims } = await supabase
         .from("lost_and_found_claims")
-        .select("*, lost_and_found_reports!inner(title, type, category), profiles!claimer_id(name, email)")
+        .select("*, lost_and_found_reports!inner(title, type, category), profiles!claimer_id(first_name, last_name)")
         .eq("lost_and_found_reports.reporter_id", userId)
         .order("created_at", { ascending: false });
       if (rClaims) setReceivedClaims(rClaims);
@@ -162,6 +164,7 @@ export default function LostAndFound() {
       setLocation(report.location);
       setDetails(report.additional_details || "");
       setExistingPhotoUrl(report.photo_url);
+      setShareName(report.share_name !== false);
     } else {
       setEditingId(null);
       setFormType("lost");
@@ -171,6 +174,7 @@ export default function LostAndFound() {
       setLocation("");
       setDetails("");
       setExistingPhotoUrl(null);
+      setShareName(true);
     }
     setPhotoFile(null);
     setSubmitted(false);
@@ -222,7 +226,8 @@ export default function LostAndFound() {
       location,
       event_time: new Date(eventTime).toISOString(),
       additional_details: details,
-      photo_url: uploadedPhotoUrl
+      photo_url: uploadedPhotoUrl,
+      share_name: shareName
     };
 
     if (editingId) {
@@ -424,8 +429,7 @@ export default function LostAndFound() {
                             <div className="text-[10px] font-bold tracking-widest uppercase text-white/40 mt-1">{claim.lost_and_found_reports?.type}</div>
                           </td>
                           <td className="p-4">
-                            <div className="font-medium text-white">{claim.profiles?.name}</div>
-                            <div className="text-xs text-white/50">{claim.profiles?.email}</div>
+                            <div className="font-medium text-white">{claim.profiles ? `${claim.profiles.first_name || ''} ${claim.profiles.last_name || ''}`.trim() : "User"}</div>
                             {claim.phone_number && <div className="text-xs text-white/50">Ph: {claim.phone_number}</div>}
                           </td>
                           <td className="p-4 max-w-[200px] text-white/70">
@@ -699,6 +703,22 @@ export default function LostAndFound() {
                         placeholder="Any distinct features or identifiers..."
                         className="focus-ring w-full bg-white/[0.04] border border-white/10 rounded-2xl px-4 py-3.5 text-sm text-white placeholder:text-white/30 resize-none"
                       />
+                    </label>
+
+                    <label className="flex items-center gap-3 pt-2 cursor-pointer group">
+                      <div className="relative flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={shareName}
+                          onChange={(e) => setShareName(e.target.checked)}
+                          className="peer sr-only"
+                        />
+                        <div className="w-10 h-6 bg-white/10 rounded-full peer-checked:bg-accent-blue transition-colors"></div>
+                        <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+                      </div>
+                      <span className="text-sm font-medium text-white/70 group-hover:text-white transition-colors">
+                        Share my name with this report
+                      </span>
                     </label>
                   </div>
 

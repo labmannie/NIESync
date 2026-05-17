@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { sendLostAndFoundEmail } from "@/lib/mailer";
 
 export async function POST(req: Request) {
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
     // Fetch item details and reporter details
     const { data: item, error: itemError } = await supabase
       .from("lost_and_found_reports")
-      .select("*, profiles!reporter_id(email, name)")
+      .select("*, profiles!reporter_id(first_name, last_name)")
       .eq("id", itemId)
       .single();
 
@@ -56,21 +57,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Failed to submit claim" }, { status: 500 });
     }
 
+    // Fetch reporter's email via admin client
+    const adminClient = createAdminClient();
+    const { data: reporterAuth } = await adminClient.auth.admin.getUserById(item.reporter_id);
+    const reporterEmail = reporterAuth?.user?.email;
+
     // Send email to the reporter
-    if (item.profiles?.email) {
-      // Fetch claimer's name
+    if (reporterEmail) {
+      // Fetch claimer's name and email
       const { data: claimerProfile } = await supabase
         .from("profiles")
-        .select("name")
+        .select("first_name, last_name")
         .eq("id", userId)
         .single();
 
+      const { data: claimerAuth } = await adminClient.auth.admin.getUserById(userId);
+      const claimerEmail = claimerAuth?.user?.email;
+
+      const reporterName = item.profiles ? `${item.profiles.first_name || ''} ${item.profiles.last_name || ''}`.trim() : "User";
+      const claimerName = claimerProfile ? `${claimerProfile.first_name || ''} ${claimerProfile.last_name || ''}`.trim() : "A user";
+
       try {
         await sendLostAndFoundEmail({
-          toEmail: item.profiles.email,
-          reporterName: item.profiles.name || "User",
+          toEmail: reporterEmail,
+          reporterName: reporterName || "User",
           itemName: item.title,
-          claimerName: claimerProfile?.name || "A user",
+          claimerName: claimerName || "A user",
+          claimerEmail: claimerEmail || null,
           claimMessage: message || "No additional message.",
           claimPhone: phone,
           itemType: item.type,

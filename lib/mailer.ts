@@ -368,6 +368,7 @@ export async function sendLostAndFoundEmail({
   reporterName,
   itemName,
   claimerName,
+  claimerEmail,
   claimMessage,
   claimPhone,
   itemType, // 'lost' or 'found'
@@ -376,6 +377,7 @@ export async function sendLostAndFoundEmail({
   reporterName: string;
   itemName: string;
   claimerName: string;
+  claimerEmail?: string | null;
   claimMessage: string;
   claimPhone?: string | null;
   itemType: string;
@@ -383,6 +385,7 @@ export async function sendLostAndFoundEmail({
   const safeName = escapeHtml((reporterName || "User").trim() || "User");
   const safeItemName = escapeHtml(itemName.trim());
   const safeClaimerName = escapeHtml(claimerName.trim());
+  const safeClaimerEmail = claimerEmail ? escapeHtml(claimerEmail.trim()) : null;
   const safeMessage = escapeHtml(claimMessage.trim());
   const safePhone = claimPhone ? escapeHtml(claimPhone.trim()) : "Not provided";
   const logoAttachment = resolveLogoAttachment();
@@ -448,6 +451,13 @@ export async function sendLostAndFoundEmail({
                           <p class="body-text" style="margin:4px 0 0;font-size:16px;line-height:1.4;font-weight:700;color:#111827;">${safeClaimerName}</p>
                         </td>
                       </tr>
+                      ${safeClaimerEmail ? `
+                      <tr>
+                        <td style="padding:12px 14px;border-bottom:1px solid #e5eaf3;">
+                          <p class="muted" style="margin:0;font-size:11px;line-height:1.5;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#586274;">Responder Email</p>
+                          <p class="body-text" style="margin:4px 0 0;font-size:15px;line-height:1.65;font-weight:600;color:#1f2937;"><a href="mailto:${safeClaimerEmail}" style="color:#2563EB;text-decoration:none;">${safeClaimerEmail}</a></p>
+                        </td>
+                      </tr>` : ''}
                       <tr>
                         <td style="padding:12px 14px;border-bottom:1px solid #e5eaf3;">
                           <p class="muted" style="margin:0;font-size:11px;line-height:1.5;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#586274;">Message</p>

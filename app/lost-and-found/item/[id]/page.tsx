@@ -56,7 +56,7 @@ export default function ItemPage({ params }: { params: Promise<{ id: string }> }
       try {
         const { data, error: fetchError } = await supabase
           .from("lost_and_found_reports")
-          .select("*, profiles!reporter_id(name, email)")
+          .select("*, profiles!reporter_id(first_name, last_name)")
           .eq("id", itemId)
           .eq("is_deleted", false)
           .single();
@@ -203,7 +203,7 @@ export default function ItemPage({ params }: { params: Promise<{ id: string }> }
                   </div>
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1">Reported By</p>
-                    <p className="text-sm font-medium text-white/90">{item.profiles?.name || "Anonymous User"}</p>
+                    <p className="text-sm font-medium text-white/90">{(item.share_name !== false) && item.profiles ? `${item.profiles.first_name || ''} ${item.profiles.last_name || ''}`.trim() || "Anonymous User" : "Anonymous User"}</p>
                   </div>
                 </div>
               </div>

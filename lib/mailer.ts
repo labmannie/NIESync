@@ -362,3 +362,177 @@ export async function sendParkingEmail({
   }
   throw new Error("Unable to deliver parking escalation email.");
 }
+
+export async function sendLostAndFoundEmail({
+  toEmail,
+  reporterName,
+  itemName,
+  claimerName,
+  claimerEmail,
+  claimMessage,
+  claimPhone,
+  itemType, // 'lost' or 'found'
+}: {
+  toEmail: string;
+  reporterName: string;
+  itemName: string;
+  claimerName: string;
+  claimerEmail?: string | null;
+  claimMessage: string;
+  claimPhone?: string | null;
+  itemType: string;
+}) {
+  const safeName = escapeHtml((reporterName || "User").trim() || "User");
+  const safeItemName = escapeHtml(itemName.trim());
+  const safeClaimerName = escapeHtml(claimerName.trim());
+  const safeClaimerEmail = claimerEmail ? escapeHtml(claimerEmail.trim()) : null;
+  const safeMessage = escapeHtml(claimMessage.trim());
+  const safePhone = claimPhone ? escapeHtml(claimPhone.trim()) : "Not provided";
+  const logoAttachment = resolveLogoAttachment();
+  const logoMarkup = logoAttachment
+    ? `<img src="cid:${logoAttachment.cid}" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`
+    : `<img src="https://niesync.vercel.app/logo.png" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`;
+
+  const subject = `NIE Sync | Someone responded to your ${itemType === 'lost' ? 'Lost' : 'Found'} Item`;
+  const { user: smtpUser, primary, fallback } = getTransporters();
+  const brandedFromName = String(process.env.PARKING_FROM_NAME || "NIE Campus Sync").trim() || "NIE Campus Sync";
+  const authenticatedFrom = `${brandedFromName} <${smtpUser}>`;
+
+  const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="color-scheme" content="light dark" />
+        <meta name="supported-color-schemes" content="light dark" />
+        <style>
+          @media (prefers-color-scheme: dark) {
+            .email-bg { background:#020202 !important; }
+            .email-card { background:#0a0a0a !important; border-color:#2a2a2a !important; }
+            .soft-panel { background:#111111 !important; border-color:#2a2a2a !important; }
+            .title, .body-text { color:#f5f5f5 !important; }
+            .muted { color:#b6b6bc !important; }
+          }
+        </style>
+      </head>
+      <body class="email-bg" style="margin:0;padding:0;background:#f4f6fb;font-family:'Rubik','Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 12px;">
+          <tr>
+            <td align="center">
+              <table class="email-card" role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border:1px solid #dbe1ec;border-radius:18px;overflow:hidden;">
+                <tr>
+                  <td style="padding:28px 28px 18px;background:#050505;">
+                    <table role="presentation" cellspacing="0" cellpadding="0" width="100%">
+                      <tr>
+                        <td style="width:64px;vertical-align:top;">
+                          ${logoMarkup}
+                        </td>
+                        <td style="vertical-align:middle;">
+                          <p style="margin:0;font-size:11px;line-height:1.4;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#FFB000;">NIE Sync</p>
+                          <p style="margin:6px 0 0;font-size:17px;line-height:1.35;font-weight:800;color:#ffffff;">Lost & Found Update</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:24px 28px 10px;">
+                    <h1 class="title" style="margin:0;font-size:24px;line-height:1.3;font-weight:800;color:#111827;">Response to your item</h1>
+                    <p class="body-text" style="margin:12px 0 0;font-size:15px;line-height:1.7;color:#1f2937;">Hello ${safeName}, someone has just submitted a response regarding the item you reported: <strong>${safeItemName}</strong>.</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 28px 0;">
+                    <table class="soft-panel" role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;border:1px solid #e5eaf3;border-radius:12px;">
+                      <tr>
+                        <td style="padding:12px 14px;border-bottom:1px solid #e5eaf3;">
+                          <p class="muted" style="margin:0;font-size:11px;line-height:1.5;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#586274;">Responder Name</p>
+                          <p class="body-text" style="margin:4px 0 0;font-size:16px;line-height:1.4;font-weight:700;color:#111827;">${safeClaimerName}</p>
+                        </td>
+                      </tr>
+                      ${safeClaimerEmail ? `
+                      <tr>
+                        <td style="padding:12px 14px;border-bottom:1px solid #e5eaf3;">
+                          <p class="muted" style="margin:0;font-size:11px;line-height:1.5;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#586274;">Responder Email</p>
+                          <p class="body-text" style="margin:4px 0 0;font-size:15px;line-height:1.65;font-weight:600;color:#1f2937;"><a href="mailto:${safeClaimerEmail}" style="color:#2563EB;text-decoration:none;">${safeClaimerEmail}</a></p>
+                        </td>
+                      </tr>` : ''}
+                      <tr>
+                        <td style="padding:12px 14px;border-bottom:1px solid #e5eaf3;">
+                          <p class="muted" style="margin:0;font-size:11px;line-height:1.5;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#586274;">Message</p>
+                          <p class="body-text" style="margin:4px 0 0;font-size:15px;line-height:1.65;font-weight:500;color:#1f2937;">${safeMessage}</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:12px 14px;">
+                          <p class="muted" style="margin:0;font-size:11px;line-height:1.5;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#586274;">Contact Phone</p>
+                          <p class="body-text" style="margin:4px 0 0;font-size:15px;line-height:1.65;font-weight:600;color:#1f2937;">${safePhone}</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:18px 28px 0;">
+                    <a href="https://niesync.vercel.app/lost-and-found" style="display:inline-block;padding:13px 22px;border-radius:10px;background:#FFB000;color:#050505;font-size:14px;font-weight:900;letter-spacing:.01em;text-decoration:none;">View in Dashboard</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:14px 28px 28px;">
+                    <p class="muted" style="margin:12px 0 0;font-size:12px;line-height:1.6;color:#7b8494;">Automated notification from NIE Sync.</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `.trim();
+
+  const attachments = logoAttachment ? [logoAttachment] : [];
+  let lastError: unknown = null;
+
+  const sendUsingTransporter = async (
+    transporter: nodemailer.Transporter,
+    source: "primary" | "fallback"
+  ) => {
+    try {
+      await transporter.sendMail({
+        from: authenticatedFrom,
+        to: toEmail,
+        subject,
+        html,
+        attachments,
+      });
+      preferredTransport = source;
+      return true;
+    } catch (error) {
+      lastError = error;
+      return false;
+    }
+  };
+
+  const candidates: Array<{ source: "primary" | "fallback"; transporter: nodemailer.Transporter }> =
+    preferredTransport === "fallback" && fallback && fallback !== primary
+      ? [
+          { source: "fallback", transporter: fallback },
+          { source: "primary", transporter: primary },
+        ]
+      : [{ source: "primary", transporter: primary }];
+
+  if (fallback && fallback !== primary && candidates.every((item) => item.source !== "fallback")) {
+    candidates.push({ source: "fallback", transporter: fallback });
+  }
+
+  for (const candidate of candidates) {
+    const sent = await sendUsingTransporter(candidate.transporter, candidate.source);
+    if (sent) return;
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error("Unable to deliver lost and found email.");
+}

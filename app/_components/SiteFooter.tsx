@@ -16,6 +16,7 @@ const RESOURCE_LINKS = [
   { name: "FAQ", href: "/faq" },
   { name: "Contact", href: "/contact" },
   { name: "About", href: "/about" },
+  { name: "Status", href: "/status" },
 ];
 
 const COMPANY_LINKS = [
@@ -129,8 +130,8 @@ export function SiteFooter() {
             <Link href="/terms-of-service" className="hover:text-white transition-colors">
               Terms of Service
             </Link>
-            <Link href="/faq" className="hover:text-white transition-colors">
-              FAQ
+            <Link href="/status" className="hover:text-white transition-colors text-accent-blue font-semibold">
+              System Status
             </Link>
           </div>
         </div>

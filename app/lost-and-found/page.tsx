@@ -85,18 +85,20 @@ export default function LostAndFound() {
   const [shareName, setShareName] = useState(true);
 
   useEffect(() => {
+    let activeUserId: string | null = null;
+
     supabase.auth.getUser().then(({ data }) => {
       if (data.user) {
+        activeUserId = data.user.id;
         setCurrentUser(data.user.id);
       }
+      fetchReports(activeUserId);
     });
-
-    fetchReports();
 
     const channel = supabase
       .channel("laf_changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "lost_and_found_reports" }, () => {
-        fetchReports();
+        fetchReports(activeUserId);
       })
       .subscribe();
 
@@ -105,10 +107,7 @@ export default function LostAndFound() {
     };
   }, []);
 
-  const fetchReports = async () => {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
-
+  const fetchReports = async (userId: string | null) => {
     const { data, error } = await supabase
       .from("lost_and_found_reports")
       .select("*")
@@ -133,6 +132,9 @@ export default function LostAndFound() {
         .eq("claimer_id", userId)
         .order("created_at", { ascending: false });
       if (mClaims) setMyClaims(mClaims);
+    } else {
+      setReceivedClaims([]);
+      setMyClaims([]);
     }
   };
 
@@ -144,7 +146,7 @@ export default function LostAndFound() {
         body: JSON.stringify({ claimId, status: action }),
       });
       if (res.ok) {
-        fetchReports();
+        fetchReports(currentUser);
       }
     } catch (e) {
       console.error(e);

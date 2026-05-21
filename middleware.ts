@@ -31,6 +31,7 @@ function isPublicRoute(pathname: string) {
     "/resolve",
     "/_next",
     "/favicon",
+    "/status",
   ];
 
   return publicPrefixes.some((prefix) => pathname.startsWith(prefix));

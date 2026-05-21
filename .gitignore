@@ -44,3 +44,7 @@ supabase/.branches/
 supabase/functions/.env
 supabase/functions/.env.*
 !supabase/functions/.env.example
+
+# Local Agent / Tooling state
+.kilo/
+

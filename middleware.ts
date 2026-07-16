@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseFetch, getPublicSupabaseConfig } from "@/utils/supabase/config";
+import { isPublicRoute, isGuestOnlyRoute, isProfileComplete } from "@/lib/authGating";
 
 const TRANSIENT_AUTH_ERROR_REGEX =
   /timed out|timeout|network|fetch|abort|econnreset|enotfound|temporar|gateway|503|504/i;
@@ -12,33 +13,6 @@ function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Pro
       setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
     ),
   ]);
-}
-
-function isPublicRoute(pathname: string) {
-  if (pathname === "/") return true;
-  const publicPrefixes = [
-    "/login",
-    "/signup",
-    "/forgot-password",
-    "/reset-password",
-    "/about",
-    "/contact",
-    "/founders",
-    "/faq",
-    "/terms-of-service",
-    "/privacy-policy",
-    "/auth",
-    "/resolve",
-    "/_next",
-    "/favicon",
-    "/status",
-  ];
-
-  return publicPrefixes.some((prefix) => pathname.startsWith(prefix));
-}
-
-function isGuestOnlyRoute(pathname: string) {
-  return pathname === "/login" || pathname === "/signup";
 }
 
 function copySupabaseCookies(source: NextResponse, target: NextResponse) {
@@ -213,13 +187,6 @@ export async function middleware(request: NextRequest) {
         return redirectResponse;
       }
 
-      const resolvedUserType =
-        profile.user_type || (profile.role === "Faculty" ? "Faculty" : "Student");
-
-      const studentNeedsUsn =
-        resolvedUserType === "Student" &&
-        (!profile.usn || !String(profile.usn).trim());
-
       let hasAnyVehicle = !!profile.vehicle_no;
       if (profile.has_vehicle && !hasAnyVehicle) {
         try {
@@ -238,7 +205,7 @@ export async function middleware(request: NextRequest) {
         }
       }
 
-      if (studentNeedsUsn || (profile.has_vehicle && !hasAnyVehicle)) {
+      if (!isProfileComplete(profile, hasAnyVehicle)) {
         const redirectUrl = request.nextUrl.clone();
         redirectUrl.pathname = "/signup/complete";
         const redirectResponse = NextResponse.redirect(redirectUrl);

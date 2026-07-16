@@ -143,7 +143,7 @@ function ExpandedContent() {
               Three Steps To <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent-blue to-cyan-400">Resolution</span>
             </h2>
             <p className="text-text-secondary text-lg leading-relaxed font-medium">
-              We've entirely overhauled the process of recovering items and reporting parking infractions. No paperwork. Just an incredibly fast, highly automated digital ecosystem.
+              We&apos;ve entirely overhauled the process of recovering items and reporting parking infractions. No paperwork. Just an incredibly fast, highly automated digital ecosystem.
             </p>
           </motion.div>
 

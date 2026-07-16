@@ -1,4 +1,25 @@
+import type { Metadata } from "next";
 import { ProfileSettingsNav } from "@/app/profile/_components/ProfileSettingsNav";
+
+export const metadata: Metadata = {
+  title: "Profile | NIE Campus Sync",
+  description: "Manage your NIE Campus Sync profile and activity.",
+  robots: { index: false, follow: false },
+  openGraph: {
+    title: "Profile | NIE Campus Sync",
+    description: "Manage your NIE Campus Sync profile and activity.",
+    url: "/profile",
+    siteName: "NIE Campus Sync",
+    images: [{ url: "/logo.png", width: 512, height: 512, alt: "NIE Campus Sync" }],
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "Profile | NIE Campus Sync",
+    description: "Manage your NIE Campus Sync profile and activity.",
+    images: ["/logo.png"],
+  },
+};
 
 export default function ProfileLayout({
   children,

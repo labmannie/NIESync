@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runParkingEscalation } from "@/lib/parkingEscalation";
+import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,22 +13,8 @@ function resolveAppBaseUrl(request: NextRequest) {
   return request.nextUrl.origin.replace(/\/$/, "");
 }
 
-function getBearerToken(request: NextRequest) {
-  const raw = String(request.headers.get("authorization") || "");
-  if (!raw.toLowerCase().startsWith("bearer ")) return "";
-  return raw.slice(7).trim();
-}
-
 export async function GET(request: NextRequest) {
-  const querySecret = String(request.nextUrl.searchParams.get("secret") || "").trim();
-  const bearerSecret = getBearerToken(request);
-  const expectedSecret = String(process.env.CRON_SECRET || "").trim();
-
-  const authorized = Boolean(
-    expectedSecret && (querySecret === expectedSecret || bearerSecret === expectedSecret)
-  );
-
-  if (!authorized) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

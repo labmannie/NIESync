@@ -1,9 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { sendLostAndFoundEmail } from "@/lib/mailer";
+import { enforceRateLimit } from "@/lib/rateLimit";
+import { canSubmitClaim, canUpdateClaimStatus, isValidClaimStatus } from "@/lib/claimsPermissions";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { itemId, message, phone } = body;
@@ -21,6 +23,16 @@ export async function POST(req: Request) {
 
     const userId = userData.user.id;
 
+    // 10 claims per 10 minutes per user is well above realistic legitimate use,
+    // and blocks a script from spamming every open item with claims.
+    const limited = await enforceRateLimit(req, {
+      name: "claims-post",
+      requests: 10,
+      windowSeconds: 10 * 60,
+      identifier: userId,
+    });
+    if (limited) return limited;
+
     // Fetch item details and reporter details
     const { data: item, error: itemError } = await supabase
       .from("lost_and_found_reports")
@@ -32,7 +44,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Item not found" }, { status: 404 });
     }
 
-    if (item.reporter_id === userId) {
+    if (!canSubmitClaim(item, userId)) {
       return NextResponse.json({ success: false, error: "You cannot claim your own item" }, { status: 400 });
     }
 
@@ -101,13 +113,17 @@ export async function POST(req: Request) {
   }
 }
 
-export async function PATCH(req: Request) {
+export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
     const { claimId, status } = body;
 
     if (!claimId || !status) {
       return NextResponse.json({ success: false, error: "Missing required fields" }, { status: 400 });
+    }
+
+    if (!isValidClaimStatus(status)) {
+      return NextResponse.json({ success: false, error: "Invalid status value" }, { status: 400 });
     }
 
     const supabase = await createClient();
@@ -118,6 +134,14 @@ export async function PATCH(req: Request) {
     }
 
     const userId = userData.user.id;
+
+    const limited = await enforceRateLimit(req, {
+      name: "claims-patch",
+      requests: 30,
+      windowSeconds: 10 * 60,
+      identifier: userId,
+    });
+    if (limited) return limited;
 
     // Verify ownership of the item this claim belongs to
     const { data: claim, error: claimError } = await supabase
@@ -130,7 +154,7 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ success: false, error: "Claim not found" }, { status: 404 });
     }
 
-    if (claim.lost_and_found_reports?.reporter_id !== userId) {
+    if (!canUpdateClaimStatus(claim, userId)) {
       return NextResponse.json({ success: false, error: "Unauthorized to update this claim" }, { status: 403 });
     }
 

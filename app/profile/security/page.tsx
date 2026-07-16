@@ -733,7 +733,7 @@ export default function ProfileSecurityPage() {
                       <div>
                         <p className="text-xs font-bold text-amber-100 sm:text-sm">This may take a few minutes</p>
                         <p className="mt-1 text-[11px] leading-relaxed text-amber-200/80 sm:text-xs">
-                          We'll gather your complete profile, all parking reports with chat transcripts, your full authentication history, and your forum posting archive. This data will be compiled into <strong>4 professionally formatted PDF documents</strong> and sent directly to your registered email.
+                          We&apos;ll gather your complete profile, all parking reports with chat transcripts, your full authentication history, and your forum posting archive. This data will be compiled into <strong>4 professionally formatted PDF documents</strong> and sent directly to your registered email.
                         </p>
                       </div>
                     </div>

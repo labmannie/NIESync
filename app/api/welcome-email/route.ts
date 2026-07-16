@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/utils/supabase/server";
 import nodemailer from "nodemailer";
 import { existsSync } from "fs";
 import path from "path";
+import { enforceRateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -253,7 +254,7 @@ function buildWelcomeEmailHtml(
 
 /* ── Route Handler ── */
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerClient();
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -263,6 +264,17 @@ export async function POST() {
     }
 
     const user = userData.user;
+
+    // Keyed by user id (in addition to IP) so one account can't trigger repeated
+    // welcome-email sends by rotating IPs, while still isolating abusive IPs.
+    const limited = await enforceRateLimit(request, {
+      name: "welcome-email",
+      requests: 3,
+      windowSeconds: 60 * 60,
+      identifier: user.id,
+    });
+    if (limited) return limited;
+
     const userEmail = String(user.email || "").trim();
 
     if (!userEmail) {

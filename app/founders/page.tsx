@@ -1,13 +1,45 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Github, Linkedin, Mail, Code2, Terminal, Shield, Database } from "lucide-react";
 import Image from "next/image";
+
+// Drop a headshot into /public/founders/<photoSlug>.jpg (or .png/.webp) to have it
+// show up automatically — no code changes needed. Until then, each card falls back
+// to the founder's initials.
+function FounderPhoto({ name, photoSlug }: { name: string; photoSlug: string }) {
+  const [failedExtensions, setFailedExtensions] = useState<string[]>([]);
+  const extensions = ["jpg", "jpeg", "png", "webp"];
+  const nextExtension = extensions.find((ext) => !failedExtensions.includes(ext));
+
+  if (!nextExtension) {
+    return (
+      <>
+        <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent" />
+        <span className="text-5xl font-black text-white/30">{name.charAt(0)}</span>
+      </>
+    );
+  }
+
+  return (
+    <Image
+      key={nextExtension}
+      src={`/founders/${photoSlug}.${nextExtension}`}
+      alt={name}
+      fill
+      sizes="160px"
+      className="object-cover"
+      onError={() => setFailedExtensions((prev) => [...prev, nextExtension])}
+    />
+  );
+}
 
 export default function Founders() {
   const founders = [
     {
       name: "Shreyas J",
+      photoSlug: "shreyas-j",
       role: "Lead Architect & Full-Stack Eng.",
       bio: "Spearheads the system architecture. Obsessed with high-performance web applications and secure institutional data flows. Built the core gamification engine.",
       icon: <Code2 className="w-6 h-6 text-accent-blue" />,
@@ -15,6 +47,7 @@ export default function Founders() {
     },
     {
       name: "Shreedhar Shivappa Hegade",
+      photoSlug: "shreedhar-shivappa-hegade",
       role: "Head of Product & UX",
       bio: "Engineered the fluid glassmorphic UI and interaction models. Focuses on extremely satisfying user experiences and conversion optimization.",
       icon: <Terminal className="w-6 h-6 text-accent-amber" />,
@@ -22,6 +55,7 @@ export default function Founders() {
     },
     {
       name: "Ritun Jain",
+      photoSlug: "ritun-jain",
       role: "Systems & Security Lead",
       bio: "Oversees the integrity of the platform. Implemented the stringent institutional authentication protocols and ensures data compliance across the board.",
       icon: <Shield className="w-6 h-6 text-emerald-500" />,
@@ -29,6 +63,7 @@ export default function Founders() {
     },
     {
       name: "Shourya Santhosh",
+      photoSlug: "shourya-santhosh",
       role: "Infrastructure & Data Ops",
       bio: "Manages the real-time database operations and API communication layers. Keeps the server response times blazingly fast even under peak campus load.",
       icon: <Database className="w-6 h-6 text-purple-500" />,
@@ -73,9 +108,7 @@ export default function Founders() {
               
               <div className="p-10 md:p-14 flex flex-col items-center text-center relative z-10">
                 <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border-4 border-campus-black bg-white/5 shadow-2xl overflow-hidden mb-8 relative group-hover:scale-105 transition-transform duration-500 flex items-center justify-center">
-                  {/* Using placeholder until real images are provided */}
-                  <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent" />
-                  <span className="text-5xl font-black text-white/30">{founder.name.charAt(0)}</span>
+                  <FounderPhoto name={founder.name} photoSlug={founder.photoSlug} />
                 </div>
 
                 <div className="flex items-center justify-center gap-3 mb-2">

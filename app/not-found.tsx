@@ -58,10 +58,10 @@ export default function NotFound() {
           transition={{ delay: 0.2 }}
         >
           <h2 className="text-2xl md:text-3xl font-bold uppercase tracking-wide mb-4">
-            YOU'VE VENTURED <span className="text-accent-amber">OFF CAMPUS</span>.
+            YOU&apos;VE VENTURED <span className="text-accent-amber">OFF CAMPUS</span>.
           </h2>
           <p className="text-text-secondary text-lg max-w-lg mx-auto mb-10">
-            The page you're looking for doesn't exist or has been relocated securely.
+            The page you&apos;re looking for doesn&apos;t exist or has been relocated securely.
           </p>
 
           <Link href="/">

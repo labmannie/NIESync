@@ -11,7 +11,7 @@ export default function TermsOfServicePage() {
 
         <section className="mt-8 space-y-6 text-sm leading-7 text-white/90">
           <p>
-            These Terms of Service ("Terms") govern your access to and use of NIE Sync, available at
+            These Terms of Service (&quot;Terms&quot;) govern your access to and use of NIE Sync, available at
             {" "}
             <a className="underline" href="https://niesync.vercel.app" target="_blank" rel="noreferrer">
               niesync.vercel.app
@@ -62,7 +62,7 @@ export default function TermsOfServicePage() {
           <div>
             <h2 className="text-lg font-bold uppercase tracking-wider">6. Disclaimer of Warranties</h2>
             <p className="mt-2">
-              NIE Sync is provided on an "as is" and "as available" basis without warranties of uninterrupted operation, merchantability,
+              NIE Sync is provided on an &quot;as is&quot; and &quot;as available&quot; basis without warranties of uninterrupted operation, merchantability,
               or fitness for a particular purpose.
             </p>
           </div>

@@ -4,6 +4,7 @@ import { createClient as createServerClient } from "@/utils/supabase/server";
 import nodemailer from "nodemailer";
 import { existsSync } from "fs";
 import path from "path";
+import { enforceRateLimit } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -379,7 +380,10 @@ async function generateProfileSummaryPdf(
   profileData: any,
   parkingReports: any[],
   authUser: any,
-  generatedAt: string
+  generatedAt: string,
+  lostAndFoundItems: any[] = [],
+  claimsMade: any[] = [],
+  claimsReceived: any[] = []
 ) {
   const doc = await createDoc();
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -487,47 +491,145 @@ async function generateProfileSummaryPdf(
     );
   }
 
-  /* ── Page 3: Lost & Found (Coming Soon) ── */
+  /* ── Page 3: Lost & Found Activity ── */
   doc.addPage();
   y = margin + 8;
 
   y = drawSectionHeading(
     doc,
-    "Lost & Found Activity",
+    "Lost & Found — Items You Posted",
     y,
     margin,
     contentWidth
   );
 
-  // Coming soon card
-  const comingSoonH = 120;
-  y = ensurePageSpace(doc, y, comingSoonH + 20, margin, pageHeight);
+  if (lostAndFoundItems.length === 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(...BRAND.slateText);
+    doc.text("You haven't posted any lost or found items.", margin, y + 2);
+    y += 24;
+  } else {
+    const headers = ["Date", "Type", "Title", "Location", "Status"];
+    const colWidths = [
+      contentWidth * 0.15,
+      contentWidth * 0.13,
+      contentWidth * 0.32,
+      contentWidth * 0.25,
+      contentWidth * 0.15,
+    ];
 
-  doc.setFillColor(...BRAND.cardBg);
-  doc.setDrawColor(...BRAND.softBorder);
-  doc.setLineWidth(0.5);
-  doc.roundedRect(margin, y, contentWidth, comingSoonH, 10, 10, "FD");
+    const tableRows = lostAndFoundItems.map((item) => [
+      toShortDate(item.created_at),
+      item.type === "found" ? "Found" : "Lost",
+      String(item.title || "-").slice(0, 40),
+      String(item.location || "-").slice(0, 30),
+      normalizeStatus(item.status),
+    ]);
 
-  // Accent bar
-  doc.setFillColor(...BRAND.accentAmber);
-  doc.roundedRect(margin, y, contentWidth, 4, 10, 10, "F");
-  doc.rect(margin, y + 2, contentWidth, 2, "F");
+    y = drawTable(
+      doc,
+      y,
+      margin,
+      contentWidth,
+      pageHeight,
+      headers,
+      tableRows,
+      colWidths
+    );
+  }
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
-  doc.setTextColor(...BRAND.ink);
-  doc.text("Coming Soon", margin + contentWidth / 2 - 48, y + 50);
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.setTextColor(...BRAND.slateText);
-  const comingSoonNote = doc.splitTextToSize(
-    "Lost & Found module data export will be available in a future update. Your lost & found reports, items, and activity logs will be included here.",
-    contentWidth - 60
+  y += 4;
+  y = ensurePageSpace(doc, y, 40, margin, pageHeight);
+  y = drawSectionHeading(
+    doc,
+    "Lost & Found — Claims You Made",
+    y,
+    margin,
+    contentWidth
   );
-  doc.text(comingSoonNote, margin + 30, y + 72);
 
-  y += comingSoonH + 16;
+  if (claimsMade.length === 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(...BRAND.slateText);
+    doc.text("You haven't submitted any claims on other users' items.", margin, y + 2);
+    y += 24;
+  } else {
+    const headers = ["Date", "Item", "Item Type", "Your Message", "Status"];
+    const colWidths = [
+      contentWidth * 0.14,
+      contentWidth * 0.24,
+      contentWidth * 0.13,
+      contentWidth * 0.32,
+      contentWidth * 0.17,
+    ];
+
+    const tableRows = claimsMade.map((claim) => [
+      toShortDate(claim.created_at),
+      String(claim.lost_and_found_reports?.title || "-").slice(0, 30),
+      claim.lost_and_found_reports?.type === "found" ? "Found" : "Lost",
+      String(claim.message || "-").slice(0, 50),
+      normalizeStatus(claim.status),
+    ]);
+
+    y = drawTable(
+      doc,
+      y,
+      margin,
+      contentWidth,
+      pageHeight,
+      headers,
+      tableRows,
+      colWidths
+    );
+  }
+
+  y += 4;
+  y = ensurePageSpace(doc, y, 40, margin, pageHeight);
+  y = drawSectionHeading(
+    doc,
+    "Lost & Found — Claims You Received",
+    y,
+    margin,
+    contentWidth
+  );
+
+  if (claimsReceived.length === 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(...BRAND.slateText);
+    doc.text("No one has claimed any of your posted items yet.", margin, y + 2);
+    y += 24;
+  } else {
+    const headers = ["Date", "Item", "Claimant Message", "Status"];
+    const colWidths = [
+      contentWidth * 0.16,
+      contentWidth * 0.28,
+      contentWidth * 0.4,
+      contentWidth * 0.16,
+    ];
+
+    const tableRows = claimsReceived.map((claim) => [
+      toShortDate(claim.created_at),
+      String(claim.lost_and_found_reports?.title || "-").slice(0, 34),
+      String(claim.message || "-").slice(0, 60),
+      normalizeStatus(claim.status),
+    ]);
+
+    y = drawTable(
+      doc,
+      y,
+      margin,
+      contentWidth,
+      pageHeight,
+      headers,
+      tableRows,
+      colWidths
+    );
+  }
+
+  y += 8;
 
   // Legal notice
   y = drawLegalFooterCard(doc, y, margin, contentWidth, pageHeight);
@@ -1284,6 +1386,18 @@ export async function POST(request: NextRequest) {
 
     const authUser = userData.user;
     const userId = authUser.id;
+
+    // This kicks off 4 PDF generations + an email send, so it's rate limited
+    // tightly — 3 exports per hour per account is plenty for a "download my data"
+    // feature while preventing it from being used to hammer SMTP/compute.
+    const limited = await enforceRateLimit(request, {
+      name: "export-my-data",
+      requests: 3,
+      windowSeconds: 60 * 60,
+      identifier: userId,
+    });
+    if (limited) return limited;
+
     const userEmail = String(authUser.email || "").trim();
 
     if (!userEmail) {
@@ -1366,6 +1480,42 @@ async function processAndSendExport({
     const sessions = (sessionsResult.data || []) as any[];
     const forumPosts = (forumPostsResult.data || []) as any[];
 
+    // Lost & Found: items the user posted, and claims they made / received.
+    const [lostAndFoundResult, claimsMadeResult] = await Promise.all([
+      admin
+        .from("lost_and_found_reports")
+        .select("id, type, title, category, location, event_time, status, created_at")
+        .eq("reporter_id", userId)
+        .eq("is_deleted", false)
+        .order("created_at", { ascending: false })
+        .limit(300),
+      admin
+        .from("lost_and_found_claims")
+        .select(
+          "id, report_id, message, status, created_at, lost_and_found_reports(title, type)"
+        )
+        .eq("claimer_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(300),
+    ]);
+
+    const lostAndFoundItems = (lostAndFoundResult.data || []) as any[];
+    const claimsMade = (claimsMadeResult.data || []) as any[];
+
+    const ownReportIds = lostAndFoundItems.map((item) => item.id);
+    let claimsReceived: any[] = [];
+    if (ownReportIds.length > 0) {
+      const { data: claimsReceivedData } = await admin
+        .from("lost_and_found_claims")
+        .select(
+          "id, report_id, message, status, created_at, lost_and_found_reports(title, type)"
+        )
+        .in("report_id", ownReportIds)
+        .order("created_at", { ascending: false })
+        .limit(300);
+      claimsReceived = (claimsReceivedData || []) as any[];
+    }
+
     // Fetch all messages for all reports
     const reportIds = parkingReports.map((r) => r.id);
     let allMessages: any[] = [];
@@ -1403,7 +1553,15 @@ async function processAndSendExport({
 
     // Generate all 4 PDFs
     const [pdf1Buffer, pdf2Buffer, pdf3Buffer, pdf4Buffer] = await Promise.all([
-      generateProfileSummaryPdf(profileData, parkingReports, authUser, generatedAt),
+      generateProfileSummaryPdf(
+        profileData,
+        parkingReports,
+        authUser,
+        generatedAt,
+        lostAndFoundItems,
+        claimsMade,
+        claimsReceived
+      ),
       generateTranscriptsPdf(
         parkingReports,
         messagesByReport,

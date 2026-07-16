@@ -180,7 +180,11 @@ function isVerified(profile: ForumProfile | null) {
 }
 
 function VerifiedGif({ sizeClass = "h-4 w-4" }: { sizeClass?: string }) {
-  return <img src="/blue_tick.gif" alt="Verified" className={cx(sizeClass, "shrink-0 rounded-full object-cover")} loading="lazy" />;
+  return (
+    <span className={cx(sizeClass, "relative inline-block shrink-0 rounded-full overflow-hidden")}>
+      <Image src="/blue_tick.gif" alt="Verified" fill unoptimized className="object-cover" />
+    </span>
+  );
 }
 
 function initialOf(profile: ForumProfile | null) {
@@ -2070,7 +2074,7 @@ export default function ForumPage() {
             onClick={composerToggle}
             className="flex w-full items-center justify-between rounded-full border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm text-white/55 transition hover:border-accent-blue/30 hover:bg-accent-blue/10 hover:text-white"
           >
-            <span>What's happening in NIESYNC Forum?</span>
+            <span>What&apos;s happening in NIESYNC Forum?</span>
             <Sparkles className="h-4 w-4 text-accent-amber" />
           </button>
 

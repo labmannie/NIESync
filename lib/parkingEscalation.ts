@@ -54,7 +54,7 @@ function getOwnerProfile(owner: EscalationReportRow["matched_owner"]): OwnerProf
   return owner;
 }
 
-function getOwnerDisplayName(owner: OwnerProfile | null) {
+export function getOwnerDisplayName(owner: OwnerProfile | null) {
   const fullName = String(owner?.full_name || "").trim();
   if (fullName) return fullName;
 
@@ -76,7 +76,7 @@ function getAutoResolveCutoffIso() {
   return new Date(Date.now() - 10 * 60 * 1000).toISOString();
 }
 
-function normalizeBaseUrl(value: string) {
+export function normalizeBaseUrl(value: string) {
   const trimmed = String(value || "").trim().replace(/\/$/, "");
   if (!trimmed) return "";
 

@@ -170,7 +170,11 @@ function Avatar({
 }
 
 function VerifiedGif({ sizeClass = "h-4 w-4" }: { sizeClass?: string }) {
-  return <img src="/blue_tick.gif" alt="Verified" className={cx(sizeClass, "shrink-0 rounded-full object-cover")} loading="lazy" />;
+  return (
+    <span className={cx(sizeClass, "relative inline-block shrink-0 rounded-full overflow-hidden")}>
+      <Image src="/blue_tick.gif" alt="Verified" fill unoptimized className="object-cover" />
+    </span>
+  );
 }
 
 function StatTile({

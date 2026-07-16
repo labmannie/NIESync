@@ -163,6 +163,133 @@ function getTransporters() {
   };
 }
 
+/**
+ * Gmail SMTP works fine for low volume but has a ~500 messages/day sending cap
+ * (2000/day on Google Workspace) and personal Gmail accounts used for
+ * transactional mail are prone to being flagged as spam at any real scale.
+ *
+ * Setting RESEND_API_KEY + RESEND_FROM_EMAIL switches all outgoing mail in this
+ * app to Resend's HTTPS API instead, with zero changes needed anywhere that calls
+ * sendParkingEmail / sendLostAndFoundEmail / sendContactMessageEmail — this is the
+ * single shared delivery path all three (and any future callers) go through.
+ * Postmark or SES would work the same way if preferred; only this function would
+ * need a new branch.
+ *
+ * If RESEND_API_KEY is not set, behavior is unchanged from before: Gmail/Zoho/
+ * custom SMTP via nodemailer, with the existing primary/fallback retry logic.
+ */
+async function deliverEmail({
+  to,
+  subject,
+  html,
+  attachments = [],
+  replyTo,
+}: {
+  to: string;
+  subject: string;
+  html: string;
+  attachments?: Array<{ filename: string; content?: Buffer | string; path?: string; cid?: string }>;
+  replyTo?: string;
+}) {
+  const fromName = String(process.env.PARKING_FROM_NAME || "NIE Campus Sync").trim() || "NIE Campus Sync";
+  const resendApiKey = String(process.env.RESEND_API_KEY || "").trim();
+
+  if (resendApiKey) {
+    const resendFromEmail = String(process.env.RESEND_FROM_EMAIL || "").trim();
+    if (!resendFromEmail) {
+      throw new Error(
+        "RESEND_API_KEY is set but RESEND_FROM_EMAIL is missing — set it to a sender address on a domain verified in Resend."
+      );
+    }
+
+    const resendAttachments = await Promise.all(
+      attachments.map(async (attachment) => {
+        let contentBase64 = "";
+        if (attachment.content) {
+          contentBase64 = Buffer.isBuffer(attachment.content)
+            ? attachment.content.toString("base64")
+            : Buffer.from(String(attachment.content)).toString("base64");
+        } else if (attachment.path) {
+          const { readFile } = await import("fs/promises");
+          contentBase64 = (await readFile(attachment.path)).toString("base64");
+        }
+        return { filename: attachment.filename, content: contentBase64 };
+      })
+    );
+
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `${fromName} <${resendFromEmail}>`,
+        to,
+        subject,
+        html,
+        reply_to: replyTo || undefined,
+        attachments: resendAttachments.length ? resendAttachments : undefined,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(`Resend API error (${response.status}): ${errorText || response.statusText}`);
+    }
+
+    return;
+  }
+
+  // Fall back to SMTP (Gmail / Zoho / custom SMTP_HOST) via nodemailer.
+  const { user: smtpUser, primary, fallback } = getTransporters();
+  const authenticatedFrom = `${fromName} <${smtpUser}>`;
+  let lastError: unknown = null;
+
+  const sendUsingTransporter = async (
+    transporter: nodemailer.Transporter,
+    source: "primary" | "fallback"
+  ) => {
+    try {
+      await transporter.sendMail({
+        from: authenticatedFrom,
+        to,
+        replyTo,
+        subject,
+        html,
+        attachments,
+      });
+      preferredTransport = source;
+      return true;
+    } catch (error) {
+      lastError = error;
+      return false;
+    }
+  };
+
+  const candidates: Array<{ source: "primary" | "fallback"; transporter: nodemailer.Transporter }> =
+    preferredTransport === "fallback" && fallback && fallback !== primary
+      ? [
+          { source: "fallback", transporter: fallback },
+          { source: "primary", transporter: primary },
+        ]
+      : [{ source: "primary", transporter: primary }];
+
+  if (fallback && fallback !== primary && candidates.every((item) => item.source !== "fallback")) {
+    candidates.push({ source: "fallback", transporter: fallback });
+  }
+
+  for (const candidate of candidates) {
+    const sent = await sendUsingTransporter(candidate.transporter, candidate.source);
+    if (sent) return;
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error("Unable to deliver email.");
+}
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -202,9 +329,6 @@ export async function sendParkingEmail({
     : `<img src="https://niesync.vercel.app/logo.png" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`;
 
   const subject = "NIE Sync | Parking Report Action Required";
-  const { user: smtpUser, primary, fallback } = getTransporters();
-  const brandedFromName = String(process.env.PARKING_FROM_NAME || "NIE Campus Sync").trim() || "NIE Campus Sync";
-  const authenticatedFrom = `${brandedFromName} <${smtpUser}>`;
   const photoSection = safePhotoUrl
     ? `
                 <tr>
@@ -318,49 +442,8 @@ export async function sendParkingEmail({
   `.trim();
 
   const attachments = logoAttachment ? [logoAttachment] : [];
-  let lastError: unknown = null;
 
-  const sendUsingTransporter = async (
-    transporter: nodemailer.Transporter,
-    source: "primary" | "fallback"
-  ) => {
-    try {
-      await transporter.sendMail({
-        from: authenticatedFrom,
-        to: toEmail,
-        subject,
-        html,
-        attachments,
-      });
-      preferredTransport = source;
-      return true;
-    } catch (error) {
-      lastError = error;
-      return false;
-    }
-  };
-
-  const candidates: Array<{ source: "primary" | "fallback"; transporter: nodemailer.Transporter }> =
-    preferredTransport === "fallback" && fallback && fallback !== primary
-      ? [
-          { source: "fallback", transporter: fallback },
-          { source: "primary", transporter: primary },
-        ]
-      : [{ source: "primary", transporter: primary }];
-
-  if (fallback && fallback !== primary && candidates.every((item) => item.source !== "fallback")) {
-    candidates.push({ source: "fallback", transporter: fallback });
-  }
-
-  for (const candidate of candidates) {
-    const sent = await sendUsingTransporter(candidate.transporter, candidate.source);
-    if (sent) return;
-  }
-
-  if (lastError instanceof Error) {
-    throw lastError;
-  }
-  throw new Error("Unable to deliver parking escalation email.");
+  await deliverEmail({ to: toEmail, subject, html, attachments });
 }
 
 export async function sendLostAndFoundEmail({
@@ -394,9 +477,6 @@ export async function sendLostAndFoundEmail({
     : `<img src="https://niesync.vercel.app/logo.png" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`;
 
   const subject = `NIE Sync | Someone responded to your ${itemType === 'lost' ? 'Lost' : 'Found'} Item`;
-  const { user: smtpUser, primary, fallback } = getTransporters();
-  const brandedFromName = String(process.env.PARKING_FROM_NAME || "NIE Campus Sync").trim() || "NIE Campus Sync";
-  const authenticatedFrom = `${brandedFromName} <${smtpUser}>`;
 
   const html = `
     <!doctype html>
@@ -492,47 +572,93 @@ export async function sendLostAndFoundEmail({
   `.trim();
 
   const attachments = logoAttachment ? [logoAttachment] : [];
-  let lastError: unknown = null;
 
-  const sendUsingTransporter = async (
-    transporter: nodemailer.Transporter,
-    source: "primary" | "fallback"
-  ) => {
-    try {
-      await transporter.sendMail({
-        from: authenticatedFrom,
-        to: toEmail,
-        subject,
-        html,
-        attachments,
-      });
-      preferredTransport = source;
-      return true;
-    } catch (error) {
-      lastError = error;
-      return false;
-    }
-  };
+  await deliverEmail({ to: toEmail, subject, html, attachments });
+}
 
-  const candidates: Array<{ source: "primary" | "fallback"; transporter: nodemailer.Transporter }> =
-    preferredTransport === "fallback" && fallback && fallback !== primary
-      ? [
-          { source: "fallback", transporter: fallback },
-          { source: "primary", transporter: primary },
-        ]
-      : [{ source: "primary", transporter: primary }];
+export async function sendContactMessageEmail({
+  name,
+  email,
+  subject,
+  message,
+}: {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+}) {
+  const inbox =
+    String(process.env.CONTACT_INBOX_EMAIL || "").trim() ||
+    String(process.env.GMAIL_USER || "").trim();
 
-  if (fallback && fallback !== primary && candidates.every((item) => item.source !== "fallback")) {
-    candidates.push({ source: "fallback", transporter: fallback });
+  if (!inbox) {
+    throw new Error("No CONTACT_INBOX_EMAIL or GMAIL_USER configured to receive contact messages.");
   }
 
-  for (const candidate of candidates) {
-    const sent = await sendUsingTransporter(candidate.transporter, candidate.source);
-    if (sent) return;
-  }
+  const safeName = escapeHtml((name || "Unknown").trim() || "Unknown");
+  const safeEmail = escapeHtml((email || "").trim());
+  const safeSubject = escapeHtml((subject || "New message").trim() || "New message");
+  const safeMessage = escapeHtml((message || "").trim()).replace(/\n/g, "<br/>");
+  const logoAttachment = resolveLogoAttachment();
+  const logoMarkup = logoAttachment
+    ? `<img src="cid:${logoAttachment.cid}" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`
+    : `<img src="https://niesync.vercel.app/logo.png" width="56" height="56" alt="NIE Sync" style="display:block;width:56px;height:56px;border-radius:12px;border:0;outline:none;text-decoration:none;" />`;
 
-  if (lastError instanceof Error) {
-    throw lastError;
-  }
-  throw new Error("Unable to deliver lost and found email.");
+  const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body style="margin:0;padding:0;background:#f4f6fb;font-family:'Rubik','Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 12px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border:1px solid #dbe1ec;border-radius:18px;overflow:hidden;">
+                <tr>
+                  <td style="padding:28px 28px 18px;background:#050505;">
+                    <table role="presentation" cellspacing="0" cellpadding="0" width="100%">
+                      <tr>
+                        <td style="width:64px;vertical-align:top;">
+                          ${logoMarkup}
+                        </td>
+                        <td style="vertical-align:middle;">
+                          <p style="margin:0;font-size:11px;line-height:1.4;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#FFB000;">NIE Sync</p>
+                          <p style="margin:6px 0 0;font-size:17px;line-height:1.35;font-weight:800;color:#ffffff;">New Contact Form Message</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:24px 28px 10px;">
+                    <p style="margin:0;font-size:15px;line-height:1.7;color:#1f2937;"><strong>From:</strong> ${safeName} (<a href="mailto:${safeEmail}" style="color:#2563EB;">${safeEmail}</a>)</p>
+                    <p style="margin:8px 0 0;font-size:15px;line-height:1.7;color:#1f2937;"><strong>Subject:</strong> ${safeSubject}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:16px 28px 28px;">
+                    <div style="background:#f8fafc;border:1px solid #e5eaf3;border-radius:12px;padding:16px 18px;">
+                      <p style="margin:0;font-size:14px;line-height:1.7;color:#1f2937;">${safeMessage}</p>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `.trim();
+
+  const attachments = logoAttachment ? [logoAttachment] : [];
+
+  await deliverEmail({
+    to: inbox,
+    subject: `NIE Sync Contact Form: ${subject || "New message"}`,
+    html,
+    attachments,
+    replyTo: safeEmail || undefined,
+  });
 }

@@ -505,7 +505,7 @@ export default function LostAndFound() {
                       ))}
                       {myClaims.length === 0 && (
                         <tr>
-                          <td colSpan={4} className="p-12 text-center text-white/40 font-medium">You haven't submitted any claims.</td>
+                          <td colSpan={4} className="p-12 text-center text-white/40 font-medium">You haven&apos;t submitted any claims.</td>
                         </tr>
                       )}
                     </tbody>
